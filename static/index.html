@@ -432,11 +432,7 @@ function renderWaveChart(waveData, patterns) {
     const reversedSlowWave = [...waveData.slow_wave].reverse();
 
     // Convert timestamps to readable format
-    const labels = reversedTimestamps.map(t => {
-        const timestamp = t * (t < 10000000000 ? 1000 : 1);
-        const formatted = moment(timestamp).format('MM-DD HH:mm');
-        return formatted;
-    });
+    const labels = reversedTimestamps.map(t => moment.unix(t).format('MM-DD HH:mm'));
     
     // Create datasets
     const datasets = [
@@ -483,13 +479,12 @@ function renderWaveChart(waveData, patterns) {
                 if (match) {
                     const [_, pointName, timestamp, value] = match;
                     const pointTime = moment(timestamp).unix();
-                    // Find index in reversed timestamps
                     const pointIndex = reversedTimestamps.findIndex(t => t >= pointTime);
                     
                     if (pointIndex !== -1) {
                         pointsData[pointIndex] = parseFloat(value);
                         
-                        // Add dataset for each point
+                        // Add point marker
                         datasets.push({
                             label: `${pointName} (${pattern.pattern_type})`,
                             data: pointsData,
@@ -499,10 +494,10 @@ function renderWaveChart(waveData, patterns) {
                             pointRadius: 8,
                             pointStyle: 'circle',
                             showLine: false,
-                            order: 3  // Draw on top
+                            order: 3
                         });
 
-                        // Add vertical line at pattern point
+                        // Add vertical line
                         datasets.push({
                             label: `${pointName} Line`,
                             data: Array(labels.length).fill(null).map((_, i) => 
@@ -515,7 +510,7 @@ function renderWaveChart(waveData, patterns) {
                             fill: false,
                             pointRadius: 0,
                             showLine: true,
-                            order: 0  // Draw behind everything
+                            order: 0
                         });
                     }
                 }
@@ -546,6 +541,10 @@ function renderWaveChart(waveData, patterns) {
                     },
                     grid: {
                         color: 'rgba(0, 0, 0, 0.1)'
+                    },
+                    ticks: {
+                        maxRotation: 45,
+                        minRotation: 45
                     }
                 },
                 y: {
@@ -585,7 +584,6 @@ function renderWaveChart(waveData, patterns) {
                     position: 'top',
                     labels: {
                         filter: function(item) {
-                            // Hide vertical line labels
                             return !item.text.includes('Line');
                         }
                     }
