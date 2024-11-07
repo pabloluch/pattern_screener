@@ -234,29 +234,40 @@ async def get_wave_data(symbol: str, timeframe: str):
     try:
         logger.info(f"Fetching wave data for {symbol} {timeframe}")
         
-        # Use existing scanner instance
-        scanner = AsyncWaveScanner()
+        # Parse timeframe to minutes
+        minutes = None
+        if timeframe.startswith('Min'):
+            minutes = int(timeframe.replace('Min', ''))
+        elif timeframe.startswith('Hour'):
+            minutes = int(timeframe.replace('Hour', '')) * 60
         
-        # Get the data using existing scan functionality
-        async with MultiSessionMarketFetcher([timeframe]) as fetcher:
-            # Fetch candles
+        if minutes is None:
+            raise HTTPException(status_code=400, detail="Invalid timeframe format")
+
+        # Get base timeframe using same logic as scanner
+        base_timeframe = TimeframeConverter.get_base_timeframe(minutes)[0]
+        logger.info(f"Using base timeframe {base_timeframe} for requested timeframe {timeframe}")
+
+        # Fetch base timeframe candles
+        async with MultiSessionMarketFetcher([base_timeframe]) as fetcher:
             all_candles = await fetcher.fetch_all_candles([symbol])
             
             if not all_candles or symbol not in all_candles:
                 logger.error(f"No candles found for {symbol}")
                 raise HTTPException(status_code=404, detail="No data found")
 
-            # Get the right timeframe data
-            candles = all_candles[symbol].get(timeframe, [])
+            # Convert to target timeframe using TimeframeConverter
+            converter = TimeframeConverter()
+            candles = converter.get_candles(all_candles[symbol], minutes)
+            
             if not candles:
-                logger.error(f"No candles found for timeframe {timeframe}")
+                logger.error(f"No candles after conversion for {timeframe}")
                 raise HTTPException(status_code=404, detail="No candles found")
 
-            # Log candle data for verification
             logger.info(f"Got {len(candles)} candles for {symbol} {timeframe}")
             logger.info(f"First candle: {candles[0].timestamp}, Last candle: {candles[-1].timestamp}")
 
-            # Calculate waves using the exact same method as in pattern detection
+            # Calculate waves using the same WaveIndicator configuration as scanner
             wave_ind = WaveIndicator(
                 ema_length1=9,
                 ema_length2=12,
@@ -269,13 +280,11 @@ async def get_wave_data(symbol: str, timeframe: str):
             fast_wave, slow_wave = wave_ind.calculate(candles)
             
             logger.info(f"Calculated waves. Fast wave length: {len(fast_wave)}, Slow wave length: {len(slow_wave)}")
-            
-            # Get corresponding timestamps
-            timestamps = [candle.timestamp for candle in candles[-len(fast_wave):]]
-            
-            # Log sample of wave values for verification
             logger.info(f"Sample fast wave values: {fast_wave[:5]}")
             logger.info(f"Sample slow wave values: {slow_wave[:5]}")
+
+            # Get timestamps from the candles corresponding to wave data
+            timestamps = [candle.timestamp for candle in candles[-len(fast_wave):]]
             logger.info(f"Sample timestamps: {timestamps[:5]}")
 
             return {
@@ -290,6 +299,31 @@ async def get_wave_data(symbol: str, timeframe: str):
 
     except Exception as e:
         logger.error(f"Error getting wave data: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Add a timeframe mapping endpoint for reference
+@app.get("/timeframe-info/{timeframe}")
+async def get_timeframe_info(timeframe: str):
+    """Get information about timeframe conversion"""
+    try:
+        minutes = None
+        if timeframe.startswith('Min'):
+            minutes = int(timeframe.replace('Min', ''))
+        elif timeframe.startswith('Hour'):
+            minutes = int(timeframe.replace('Hour', '')) * 60
+            
+        if minutes is None:
+            raise HTTPException(status_code=400, detail="Invalid timeframe format")
+            
+        base_timeframe, base_minutes = TimeframeConverter.get_base_timeframe(minutes)
+        
+        return {
+            "requested_timeframe": timeframe,
+            "minutes": minutes,
+            "base_timeframe": base_timeframe,
+            "base_minutes": base_minutes
+        }
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/patterns/statistics")

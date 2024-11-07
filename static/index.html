@@ -414,6 +414,8 @@ async function showWaveGraph(symbol, timeframe, patterns) {
     }
 }
 
+
+
 function renderWaveChart(waveData, patterns) {
     console.log('Wave Data:', waveData);
     console.log('Patterns:', patterns);
@@ -430,6 +432,36 @@ function renderWaveChart(waveData, patterns) {
         const formatted = moment(timestamp).format('MM-DD HH:mm');
         return formatted;
     });
+
+    // Add verification function here
+    function verifyPatternPoints(waveData, patterns) {
+        patterns.forEach(pattern => {
+            if (pattern.pattern_points) {
+                const points = pattern.pattern_points.split('\n');
+                points.forEach(point => {
+                    const match = point.match(/(\w+): ([\d-]+) UTC - Value: ([-\d.]+)/);
+                    if (match) {
+                        const [_, pointName, timestamp, value] = match;
+                        const pointTime = moment(timestamp).unix();
+                        const pointIndex = waveData.timestamps.findIndex(t => t >= pointTime);
+                        
+                        if (pointIndex !== -1) {
+                            console.log(`Verification for ${pointName}:`, {
+                                pattern_value: parseFloat(value),
+                                fast_wave_value: waveData.fast_wave[pointIndex],
+                                slow_wave_value: waveData.slow_wave[pointIndex],
+                                timestamp: moment(pointTime * 1000).format('YYYY-MM-DD HH:mm:ss'),
+                                point_index: pointIndex
+                            });
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    // Add verification call here, before creating datasets
+    verifyPatternPoints(waveData, patterns);
     
     // Create datasets for waves
     const datasets = [
