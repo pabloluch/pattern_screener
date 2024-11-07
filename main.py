@@ -37,28 +37,34 @@ class ScannerState:
         
     def add_patterns(self, new_patterns):
         try:
+            flattened_patterns = []
             if isinstance(new_patterns, dict):
-                # Convert dictionary of timeframe results to list of patterns
-                flattened_patterns = []
                 for symbol, timeframe_data in new_patterns.items():
-                    for timeframe, patterns in timeframe_data.items():
-                        if patterns:  # Only add if patterns exist
-                            pattern_entry = {
-                                'symbol': symbol,
-                                'timeframe': timeframe,
-                                'timestamp': datetime.now(timezone.utc).isoformat(),
-                                'patterns': patterns
-                            }
-                            flattened_patterns.append(pattern_entry)
-                
+                    for timeframe, pattern_data in timeframe_data.items():
+                        # Handle both bull and bear patterns
+                        if pattern_data:
+                            for pattern_type in ['bull', 'bear']:
+                                for wave_type in ['fast_wave', 'slow_wave']:
+                                    if (pattern := pattern_data.get(pattern_type, {}).get(wave_type)):
+                                        pattern_entry = {
+                                            'symbol': symbol,
+                                            'timeframe': timeframe,
+                                            'pattern_type': pattern_type,
+                                            'wave_type': wave_type,
+                                            'timestamp': datetime.now(timezone.utc).isoformat(),
+                                            'pattern_points': pattern.get('pattern_points', ''),
+                                            'max_position': pattern.get('max_position', 0),
+                                            'max_leverage': pattern.get('max_leverage', 0)
+                                        }
+                                        flattened_patterns.append(pattern_entry)
+            
+            if flattened_patterns:
                 self.recent_patterns = flattened_patterns + self.recent_patterns
-            elif isinstance(new_patterns, list):
-                self.recent_patterns = new_patterns + self.recent_patterns
-            
-            # Keep only last 100 patterns
-            self.recent_patterns = self.recent_patterns[:100]
-            
-            logger.info(f"Successfully added patterns. Total patterns: {len(self.recent_patterns)}")
+                self.recent_patterns = self.recent_patterns[:100]  # Keep only last 100 patterns
+                logger.info(f"Added {len(flattened_patterns)} new patterns. Total: {len(self.recent_patterns)}")
+            else:
+                logger.info("No new patterns to add")
+                
         except Exception as e:
             logger.error(f"Error adding patterns: {str(e)}", exc_info=True)
 
@@ -169,6 +175,18 @@ async def debug_state():
         "is_scanning": scanner_state.is_scanning,
         "scan_history_count": len(scanner_state.scan_history),
         "active_connections": len(active_connections)
+    }
+
+@app.get("/debug/patterns/raw")
+async def debug_patterns_raw():
+    """Show raw pattern data"""
+    return {
+        "patterns": scanner_state.recent_patterns,
+        "sample_pattern": scanner_state.recent_patterns[0] if scanner_state.recent_patterns else None,
+        "pattern_structure": {
+            "keys": list(scanner_state.recent_patterns[0].keys()) if scanner_state.recent_patterns else None,
+            "nested_structure": str(type(scanner_state.recent_patterns[0].get("patterns"))) if scanner_state.recent_patterns else None
+        }
     }
 
 # Pattern endpoints

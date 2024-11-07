@@ -260,10 +260,9 @@
             };
             
             ws.onmessage = function(event) {
-                const patterns = JSON.parse(event.data);
-                updateDashboard(patterns);
-                lastUpdateTime = new Date();
-                updateLastScanTime();
+                const data = JSON.parse(event.data);
+                logPatternData(data.data); // Add debugging
+                updateDashboard(data.data);
             };
             
             ws.onclose = function() {
@@ -305,71 +304,77 @@
         }
 
         function updatePatternsTable(patterns) {
-            const tbody = document.getElementById('patterns-table').querySelector('tbody');
-            tbody.innerHTML = patterns.map(p => `
-                <tr>
-                    <td>${moment(p.timestamp).format('HH:mm:ss')}</td>
-                    <td>${p.symbol}</td>
-                    <td>${p.timeframe}</td>
-                    <td class="pattern-${p.pattern_type}">${p.pattern_type.toUpperCase()}</td>
-                    <td>${p.wave_type}</td>
-                    <td>${p.max_position.toLocaleString()}</td>
-                    <td class="pattern-details">${p.pattern_points}</td>
-                </tr>
-            `).join('');
+        const tbody = document.getElementById('patterns-table').querySelector('tbody');
+        tbody.innerHTML = patterns.map(p => `
+            <tr>
+                <td>${moment(p.timestamp).format('YYYY-MM-DD HH:mm:ss')}</td>
+                <td>${p.symbol}</td>
+                <td>${p.timeframe}</td>
+                <td class="pattern-${p.pattern_type}">${p.pattern_type.toUpperCase()}</td>
+                <td>${p.wave_type.replace('_', ' ')}</td>
+                <td>${p.max_position ? p.max_position.toLocaleString() : 'N/A'}</td>
+                <td class="pattern-details">${p.pattern_points || 'No details available'}</td>
+            </tr>
+        `).join('');
+    }
+
+    function updatePatternChart(patterns) {
+        const timeframes = [...new Set(patterns.map(p => p.timeframe))];
+        const data = timeframes.map(tf => {
+            const tfPatterns = patterns.filter(p => p.timeframe === tf);
+            return {
+                timeframe: tf,
+                bull: tfPatterns.filter(p => p.pattern_type === 'bull').length,
+                bear: tfPatterns.filter(p => p.pattern_type === 'bear').length
+            };
+        });
+
+        if (patternChart) {
+            patternChart.destroy();
         }
 
-        function updatePatternChart(patterns) {
-            const timeframes = [...new Set(patterns.map(p => p.timeframe))];
-            const bullCounts = timeframes.map(tf => 
-                patterns.filter(p => p.timeframe === tf && p.pattern_type === 'bull').length
-            );
-            const bearCounts = timeframes.map(tf => 
-                patterns.filter(p => p.timeframe === tf && p.pattern_type === 'bear').length
-            );
-
-            if (patternChart) {
-                patternChart.destroy();
-            }
-
-            const ctx = document.getElementById('patternChart').getContext('2d');
-            patternChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: timeframes,
-                    datasets: [{
-                        label: 'Bull Patterns',
-                        data: bullCounts,
-                        backgroundColor: 'rgba(46, 204, 113, 0.5)',
-                        borderColor: 'rgb(46, 204, 113)',
-                        borderWidth: 1
-                    }, {
-                        label: 'Bear Patterns',
-                        data: bearCounts,
-                        backgroundColor: 'rgba(231, 76, 60, 0.5)',
-                        borderColor: 'rgb(231, 76, 60)',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                stepSize: 1
-                            }
+        const ctx = document.getElementById('patternChart').getContext('2d');
+        patternChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.map(d => d.timeframe),
+                datasets: [{
+                    label: 'Bull Patterns',
+                    data: data.map(d => d.bull),
+                    backgroundColor: 'rgba(46, 204, 113, 0.5)',
+                    borderColor: 'rgb(46, 204, 113)',
+                    borderWidth: 1
+                }, {
+                    label: 'Bear Patterns',
+                    data: data.map(d => d.bear),
+                    backgroundColor: 'rgba(231, 76, 60, 0.5)',
+                    borderColor: 'rgb(231, 76, 60)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1
                         }
                     }
                 }
-            });
+            }
+        });
+    }
+
+    // Add debugging output
+    function logPatternData(patterns) {
+        console.log('Received patterns:', patterns);
+        console.log('Pattern count:', patterns.length);
+        if (patterns.length > 0) {
+            console.log('Sample pattern:', patterns[0]);
         }
+    }
 
         // Initialize
         async function initialize() {
