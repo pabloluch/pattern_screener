@@ -417,181 +417,173 @@ async function showWaveGraph(symbol, timeframe, patterns) {
 
 
 function renderWaveChart(waveData, patterns) {
-    console.log('Wave Data:', waveData);
-    console.log('Patterns:', patterns);
-
-    const ctx = document.getElementById('waveChart').getContext('2d');
-    
-    if (waveChart) {
-        waveChart.destroy();
-    }
-
-    // Reverse arrays to show time from left to right
-    const reversedTimestamps = [...waveData.timestamps].reverse();
-    const reversedFastWave = [...waveData.fast_wave].reverse();
-    const reversedSlowWave = [...waveData.slow_wave].reverse();
-
-    // Convert timestamps to readable format
-    const labels = reversedTimestamps.map(t => moment.unix(t).format('MM-DD HH:mm'));
-    
-    // Create datasets
-    const datasets = [
-        // Zero line (thick black)
-        {
-            label: 'Zero Line',
-            data: Array(labels.length).fill(0),
-            borderColor: 'rgb(0, 0, 0)',
-            borderWidth: 2,
-            fill: false,
-            tension: 0,
-            order: 1  // Draw on bottom
-        },
-        // Fast Wave
-        {
-            label: 'Fast Wave',
-            data: reversedFastWave,
-            borderColor: 'rgb(52, 152, 219)',
-            borderWidth: 1.5,
-            fill: false,
-            tension: 0.1,
-            order: 2
-        },
-        // Slow Wave
-        {
-            label: 'Slow Wave',
-            data: reversedSlowWave,
-            borderColor: 'rgb(231, 76, 60)',
-            borderWidth: 1.5,
-            fill: false,
-            tension: 0.1,
-            order: 2
+        const ctx = document.getElementById('waveChart').getContext('2d');
+        
+        if (waveChart) {
+            waveChart.destroy();
         }
-    ];
 
-    // Add pattern points
-    patterns.forEach(pattern => {
-        if (pattern.pattern_points) {
-            const points = pattern.pattern_points.split('\n');
-            const pointsData = Array(labels.length).fill(null);
-            
-            points.forEach(point => {
-                const match = point.match(/(\w+): ([\d-]+) UTC - Value: ([-\d.]+)/);
-                if (match) {
-                    const [_, pointName, timestamp, value] = match;
-                    const pointTime = moment(timestamp).unix();
-                    const pointIndex = reversedTimestamps.findIndex(t => t >= pointTime);
-                    
-                    if (pointIndex !== -1) {
-                        pointsData[pointIndex] = parseFloat(value);
+        // Just use the timestamps directly from waveData without any manipulation
+        const labels = waveData.timestamps.map(t => moment.unix(t).format('MM-DD HH:mm'));
+        
+        const datasets = [
+            // Zero line
+            {
+                label: 'Zero Line',
+                data: Array(waveData.timestamps.length).fill(0),
+                borderColor: 'rgb(0, 0, 0)',
+                borderWidth: 2,
+                fill: false,
+                tension: 0,
+                order: 1
+            },
+            // Fast Wave
+            {
+                label: 'Fast Wave',
+                data: waveData.fast_wave,
+                borderColor: 'rgb(52, 152, 219)',
+                borderWidth: 1.5,
+                fill: false,
+                tension: 0.1,
+                order: 2
+            },
+            // Slow Wave
+            {
+                label: 'Slow Wave',
+                data: waveData.slow_wave,
+                borderColor: 'rgb(231, 76, 60)',
+                borderWidth: 1.5,
+                fill: false,
+                tension: 0.1,
+                order: 2
+            }
+        ];
+
+        // Add pattern points
+        patterns.forEach(pattern => {
+            if (pattern.pattern_points) {
+                const points = pattern.pattern_points.split('\n');
+                points.forEach(point => {
+                    const match = point.match(/(\w+): ([\d-]+) UTC - Value: ([-\d.]+)/);
+                    if (match) {
+                        const [_, pointName, timestamp, value] = match;
+                        // Find the exact timestamp in our data
+                        const pointTime = moment(timestamp).unix();
+                        const pointIndex = waveData.timestamps.indexOf(pointTime);
                         
-                        // Add point marker
-                        datasets.push({
-                            label: `${pointName} (${pattern.pattern_type})`,
-                            data: pointsData,
-                            pointBackgroundColor: pattern.pattern_type === 'bull' ? 'rgb(46, 204, 113)' : 'rgb(231, 76, 60)',
-                            pointBorderColor: 'white',
-                            pointBorderWidth: 2,
-                            pointRadius: 8,
-                            pointStyle: 'circle',
-                            showLine: false,
-                            order: 3
-                        });
+                        if (pointIndex !== -1) {
+                            // Add point marker
+                            const pointData = Array(waveData.timestamps.length).fill(null);
+                            pointData[pointIndex] = parseFloat(value);
+                            
+                            datasets.push({
+                                label: `${pointName} (${pattern.pattern_type})`,
+                                data: pointData,
+                                pointBackgroundColor: pattern.pattern_type === 'bull' ? 'rgb(46, 204, 113)' : 'rgb(231, 76, 60)',
+                                pointBorderColor: 'white',
+                                pointBorderWidth: 2,
+                                pointRadius: 8,
+                                pointStyle: 'circle',
+                                showLine: false,
+                                order: 3
+                            });
 
-                        // Add vertical line
-                        datasets.push({
-                            label: `${pointName} Line`,
-                            data: Array(labels.length).fill(null).map((_, i) => 
-                                i === pointIndex ? [-100, parseFloat(value), 100] : null
-                            ),
-                            borderColor: pattern.pattern_type === 'bull' ? 
-                                'rgba(46, 204, 113, 0.2)' : 'rgba(231, 76, 60, 0.2)',
-                            borderWidth: 1,
-                            borderDash: [5, 5],
-                            fill: false,
-                            pointRadius: 0,
-                            showLine: true,
-                            order: 0
-                        });
+                            // Add vertical line
+                            datasets.push({
+                                label: `${pointName} Line`,
+                                data: Array(waveData.timestamps.length).fill(null).map((_, i) => 
+                                    i === pointIndex ? [-100, parseFloat(value), 100] : null
+                                ),
+                                borderColor: pattern.pattern_type === 'bull' ? 
+                                    'rgba(46, 204, 113, 0.2)' : 'rgba(231, 76, 60, 0.2)',
+                                borderWidth: 1,
+                                borderDash: [5, 5],
+                                fill: false,
+                                pointRadius: 0,
+                                showLine: true,
+                                order: 0
+                            });
+                        }
                     }
-                }
-            });
-        }
-    });
+                });
+            }
+        });
 
-    // Create chart
-    waveChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: datasets
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                intersect: false,
-                mode: 'index'
+        waveChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: datasets
             },
-            scales: {
-                x: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: 'Time'
-                    },
-                    grid: {
-                        color: 'rgba(0, 0, 0, 0.1)'
-                    },
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45
-                    }
-                },
-                y: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: 'Wave Value'
-                    },
-                    min: -100,
-                    max: 100,
-                    grid: {
-                        color: 'rgba(0, 0, 0, 0.1)',
-                        zeroLineColor: 'rgba(0, 0, 0, 0.25)',
-                        zeroLineWidth: 2
-                    }
-                }
-            },
-            plugins: {
-                tooltip: {
-                    enabled: true,
-                    mode: 'index',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
                     intersect: false,
-                    callbacks: {
-                        label: function(context) {
-                            let label = context.dataset.label || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed.y !== null) {
-                                label += context.parsed.y.toFixed(2);
-                            }
-                            return label;
+                    mode: 'index'
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Time'
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)'
+                        },
+                        ticks: {
+                            maxRotation: 45,
+                            minRotation: 45,
+                            autoSkip: true,
+                            maxTicksLimit: 15
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Wave Value'
+                        },
+                        min: -100,
+                        max: 100,
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.1)',
+                            zeroLineColor: 'rgba(0, 0, 0, 0.25)',
+                            zeroLineWidth: 2
                         }
                     }
                 },
-                legend: {
-                    position: 'top',
-                    labels: {
-                        filter: function(item) {
-                            return !item.text.includes('Line');
+                plugins: {
+                    tooltip: {
+                        enabled: true,
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += context.parsed.y.toFixed(2);
+                                }
+                                return label;
+                            }
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            filter: function(item) {
+                                return !item.text.includes('Line');
+                            }
                         }
                     }
                 }
             }
-        }
-    });
-}
+        });
+    }
 
         function displayPatternPoints(patterns) {
             const container = document.getElementById('patternPoints');
