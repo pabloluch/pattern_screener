@@ -385,128 +385,130 @@
             historyDiv.insertBefore(scanDiv, historyDiv.firstChild);
         }
 
-        async function showWaveGraph(symbol, timeframe, patterns) {
-            const modal = document.getElementById('graphModal');
-            const loading = document.getElementById('loading');
-            const title = document.getElementById('graphTitle');
-            title.textContent = `${symbol} - ${timeframe} Wave Pattern`;
-            
-            loading.style.display = 'block';
-            modal.style.display = 'block';
-            
-            try {
-                const response = await fetch(`/wave-data/${symbol}/${timeframe}`);
-                const waveData = await response.json();
-                
-                if (waveData.error) {
-                    throw new Error(waveData.error);
-                }
-                
-                renderWaveChart(waveData, patterns);
-                displayPatternPoints(patterns);
-                
-            } catch (error) {
-                console.error('Error fetching wave data:', error);
-                alert('Error loading wave data: ' + error.message);
-            } finally {
-                loading.style.display = 'none';
-            }
+// Update the showWaveGraph function in index.html
+async function showWaveGraph(symbol, timeframe, patterns) {
+    const modal = document.getElementById('graphModal');
+    const loading = document.getElementById('loading');
+    const title = document.getElementById('graphTitle');
+    
+    title.textContent = `${symbol} - ${timeframe} Wave Pattern`;
+    loading.style.display = 'block';
+    modal.style.display = 'block';
+    
+    try {
+        const response = await fetch(`/wave-data/${symbol}/${timeframe}`);
+        const waveData = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(waveData.detail || 'Failed to fetch wave data');
         }
 
-        function renderWaveChart(waveData, patterns) {
-            const ctx = document.getElementById('waveChart').getContext('2d');
-            
-            if (waveChart) {
-                waveChart.destroy();
-            }
+        renderWaveChart(waveData, patterns);
+        displayPatternPoints(patterns);
+        
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error loading wave data: ' + error.message);
+    } finally {
+        loading.style.display = 'none';
+    }
+}
 
-            const labels = waveData.timestamps.map(t => moment(t * 1000).format('MM-DD HH:mm'));
-            
-            const datasets = [
-                {
-                    label: 'Fast Wave',
-                    data: waveData.fast_wave,
-                    borderColor: 'rgb(52, 152, 219)',
-                    fill: false,
-                    tension: 0.1
-                },
-                {
-                    label: 'Slow Wave',
-                    data: waveData.slow_wave,
-                    borderColor: 'rgb(231, 76, 60)',
-                    fill: false,
-                    tension: 0.1
-                }
-            ];
+function renderWaveChart(waveData, patterns) {
+    const ctx = document.getElementById('waveChart').getContext('2d');
+    
+    if (waveChart) {
+        waveChart.destroy();
+    }
 
-            patterns.forEach(pattern => {
-                if (pattern.pattern_points) {
-                    const points = pattern.pattern_points.split('\n');
-                    points.forEach(point => {
-                        const match = point.match(/(\w+): ([\d-]+) UTC - Value: ([-\d.]+)/);
-                        if (match) {
-                            const [_, pointName, timestamp, value] = match;
-                            const pointTime = moment(timestamp).unix();
-                            const pointIndex = waveData.timestamps.indexOf(pointTime);
-                            
-                            if (pointIndex !== -1) {
-                                datasets.push({
-                                    label: `${pointName} (${pattern.pattern_type})`,
-                                    data: Array(waveData.timestamps.length).fill(null),
-                                    backgroundColor: pattern.pattern_type === 'bull' ? 'rgb(46, 204, 113)' : 'rgb(231, 76, 60)',
-                                    pointBackgroundColor: pattern.pattern_type === 'bull' ? 'rgb(46, 204, 113)' : 'rgb(231, 76, 60)',
-                                    pointRadius: 8,
-                                    showLine: false
-                                });
-                                datasets[datasets.length - 1].data[pointIndex] = parseFloat(value);
-                            }
-                        }
-                    });
-                }
-            });
+    // Convert timestamps to readable format
+    const labels = waveData.timestamps.map(t => moment(t * 1000).format('MM-DD HH:mm'));
+    
+    // Create datasets for waves
+    const datasets = [
+        {
+            label: 'Fast Wave',
+            data: waveData.fast_wave,
+            borderColor: 'rgb(52, 152, 219)',
+            fill: false,
+            tension: 0.1
+        },
+        {
+            label: 'Slow Wave',
+            data: waveData.slow_wave,
+            borderColor: 'rgb(231, 76, 60)',
+            fill: false,
+            tension: 0.1
+        }
+    ];
 
-            waveChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: datasets
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        intersect: false,
-                        mode: 'index'
-                    },
-                    scales: {
-                        x: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Time'
-                            }
-                        },
-                        y: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Wave Value'
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            enabled: true,
-                            mode: 'index',
-                            intersect: false
-                        },
-                        legend: {
-                            position: 'top'
-                        }
+    // Add pattern points
+    patterns.forEach(pattern => {
+        if (pattern.pattern_points) {
+            // Parse pattern points from the text
+            const points = pattern.pattern_points.split('\n');
+            points.forEach(point => {
+                const match = point.match(/(\w+): ([\d-]+) UTC - Value: ([-\d.]+)/);
+                if (match) {
+                    const [_, pointName, timestamp, value] = match;
+                    // Find the closest timestamp index
+                    const pointTime = moment(timestamp).unix();
+                    const pointIndex = waveData.timestamps.findIndex(t => t >= pointTime);
+                    
+                    if (pointIndex !== -1) {
+                        // Add point to chart
+                        const pointDataset = {
+                            label: `${pointName} (${pattern.pattern_type})`,
+                            data: Array(waveData.timestamps.length).fill(null),
+                            pointBackgroundColor: pattern.pattern_type === 'bull' ? 'rgb(46, 204, 113)' : 'rgb(231, 76, 60)',
+                            pointRadius: 8,
+                            showLine: false
+                        };
+                        pointDataset.data[pointIndex] = parseFloat(value);
+                        datasets.push(pointDataset);
                     }
                 }
             });
         }
+    });
+
+    // Create chart
+    waveChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            scales: {
+                x: {
+                    display: true,
+                    title: { display: true, text: 'Time' }
+                },
+                y: {
+                    display: true,
+                    title: { display: true, text: 'Wave Value' }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    enabled: true,
+                    mode: 'index',
+                    intersect: false
+                },
+                legend: {
+                    position: 'top'
+                }
+            }
+        }
+    });
+}
 
         function displayPatternPoints(patterns) {
             const container = document.getElementById('patternPoints');

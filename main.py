@@ -2,7 +2,7 @@ import os
 import asyncio
 import logging
 import traceback
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -194,6 +194,45 @@ async def debug_patterns_raw():
 async def get_patterns():
     """Get recent patterns"""
     return scanner_state.recent_patterns
+
+@app.get("/wave-data/{symbol}/{timeframe}")
+async def get_wave_data(symbol: str, timeframe: str):
+    """Get wave data and pattern points for a specific symbol and timeframe"""
+    try:
+        # Use existing scanner instance
+        scanner = AsyncWaveScanner()
+        
+        # Get the data using existing scan functionality
+        async with MultiSessionMarketFetcher([timeframe]) as fetcher:
+            all_candles = await fetcher.fetch_all_candles([symbol])
+            
+            if not all_candles or symbol not in all_candles:
+                raise HTTPException(status_code=404, detail="No data found")
+
+            # Calculate waves using the same method as in pattern detection
+            wave_ind = WaveIndicator()
+            candles = all_candles[symbol].get(timeframe, [])
+            
+            if not candles:
+                raise HTTPException(status_code=404, detail="No candles found")
+
+            # Calculate the wave values
+            fast_wave, slow_wave = wave_ind.calculate(candles)
+            
+            # Get timestamps from candles
+            timestamps = [candle.timestamp for candle in candles[-len(fast_wave):]]
+
+            return {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "timestamps": timestamps,
+                "fast_wave": fast_wave.tolist(),
+                "slow_wave": slow_wave.tolist()
+            }
+
+    except Exception as e:
+        logger.error(f"Error getting wave data: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/patterns/statistics")
 async def get_pattern_statistics():
