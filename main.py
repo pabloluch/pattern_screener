@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import traceback
 from fastapi import FastAPI, WebSocket
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -27,8 +28,45 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
+class ScannerState:
+    def __init__(self):
+        self.recent_patterns = []
+        self.last_scan_time = None
+        self.is_scanning = False
+        self.scan_history = []
+        
+    def add_patterns(self, new_patterns):
+        try:
+            if isinstance(new_patterns, dict):
+                # Convert dictionary of timeframe results to list of patterns
+                flattened_patterns = []
+                for symbol, timeframe_data in new_patterns.items():
+                    for timeframe, patterns in timeframe_data.items():
+                        if patterns:  # Only add if patterns exist
+                            pattern_entry = {
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'timestamp': datetime.now(timezone.utc).isoformat(),
+                                'patterns': patterns
+                            }
+                            flattened_patterns.append(pattern_entry)
+                
+                self.recent_patterns = flattened_patterns + self.recent_patterns
+            elif isinstance(new_patterns, list):
+                self.recent_patterns = new_patterns + self.recent_patterns
+            
+            # Keep only last 100 patterns
+            self.recent_patterns = self.recent_patterns[:100]
+            
+            logger.info(f"Successfully added patterns. Total patterns: {len(self.recent_patterns)}")
+        except Exception as e:
+            logger.error(f"Error adding patterns: {str(e)}", exc_info=True)
+
+# Initialize FastAPI app and state
 app = FastAPI(title="Wave Pattern Scanner")
+scanner_state = ScannerState()
+scanner = AsyncWaveScanner()
+active_connections: List[WebSocket] = []
 
 # Configure CORS
 app.add_middleware(
@@ -41,14 +79,6 @@ app.add_middleware(
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Global variables
-scanner = AsyncWaveScanner()
-active_connections: List[WebSocket] = []
-recent_patterns: List[Dict] = []
-last_scan_time: Optional[datetime] = None
-is_scanning: bool = False
-scan_history: List[Dict] = []  # Store basic scan statistics
 
 # Base router
 @app.get("/", response_class=HTMLResponse)
@@ -86,64 +116,108 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "last_scan": last_scan_time.isoformat() if last_scan_time else None,
-        "patterns_found": len(recent_patterns),
+        "last_scan": scanner_state.last_scan_time.isoformat() if scanner_state.last_scan_time else None,
+        "patterns_found": len(scanner_state.recent_patterns),
         "active_connections": len(active_connections),
-        "is_scanning": is_scanning
+        "is_scanning": scanner_state.is_scanning
     }
 
 @app.get("/status")
 async def get_status():
     """Get detailed scanner status"""
     return {
-        "last_scan_time": last_scan_time.isoformat() if last_scan_time else None,
-        "patterns_found": len(recent_patterns),
+        "last_scan_time": scanner_state.last_scan_time.isoformat() if scanner_state.last_scan_time else None,
+        "patterns_found": len(scanner_state.recent_patterns),
         "active_connections": len(active_connections),
-        "is_scanning": is_scanning,
-        "scan_history": scan_history[-10:],  # Last 10 scans
+        "is_scanning": scanner_state.is_scanning,
+        "scan_history": scanner_state.scan_history[-10:],  # Last 10 scans
         "memory_usage": {
-            "patterns": len(recent_patterns),
+            "patterns": len(scanner_state.recent_patterns),
             "connections": len(active_connections)
         }
     }
 
-# Pattern management endpoints
+# Debug endpoints
+@app.get("/debug/scan-result")
+async def debug_last_scan():
+    """Debug endpoint to see raw scan result structure"""
+    try:
+        results = await scanner.scan_market()
+        return {
+            "raw_results": results,
+            "type": str(type(results)),
+            "structure": {
+                "is_dict": isinstance(results, dict),
+                "is_list": isinstance(results, list),
+                "keys": list(results.keys()) if isinstance(results, dict) else None,
+                "sample": str(results)[:1000] + "..." if results else None
+            }
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@app.get("/debug/state")
+async def debug_state():
+    """Debug endpoint to see current scanner state"""
+    return {
+        "recent_patterns_count": len(scanner_state.recent_patterns),
+        "recent_patterns_type": str(type(scanner_state.recent_patterns)),
+        "last_scan_time": scanner_state.last_scan_time,
+        "is_scanning": scanner_state.is_scanning,
+        "scan_history_count": len(scanner_state.scan_history),
+        "active_connections": len(active_connections)
+    }
+
+# Pattern endpoints
 @app.get("/patterns")
 async def get_patterns():
     """Get recent patterns"""
-    return recent_patterns
+    return scanner_state.recent_patterns
 
 @app.get("/patterns/statistics")
 async def get_pattern_statistics():
     """Get pattern statistics"""
-    if not recent_patterns:
+    if not scanner_state.recent_patterns:
         return {"message": "No patterns found"}
     
-    # Calculate statistics
-    bull_patterns = len([p for p in recent_patterns if p.get("pattern_type") == "bull"])
-    bear_patterns = len([p for p in recent_patterns if p.get("pattern_type") == "bear"])
-    timeframes = {}
-    symbols = {}
-    
-    for pattern in recent_patterns:
-        # Count timeframes
-        tf = pattern.get("timeframe", "unknown")
-        timeframes[tf] = timeframes.get(tf, 0) + 1
+    try:
+        # Calculate statistics
+        patterns = scanner_state.recent_patterns
+        timeframes = {}
+        symbols = {}
         
-        # Count symbols
-        symbol = pattern.get("symbol", "unknown")
-        symbols[symbol] = symbols.get(symbol, 0) + 1
-    
-    return {
-        "total_patterns": len(recent_patterns),
-        "bull_patterns": bull_patterns,
-        "bear_patterns": bear_patterns,
-        "timeframe_distribution": timeframes,
-        "symbol_distribution": symbols,
-        "last_update": last_scan_time.isoformat() if last_scan_time else None
-    }
+        for pattern in patterns:
+            # Count timeframes
+            tf = pattern.get("timeframe", "unknown")
+            timeframes[tf] = timeframes.get(tf, 0) + 1
+            
+            # Count symbols
+            symbol = pattern.get("symbol", "unknown")
+            symbols[symbol] = symbols.get(symbol, 0) + 1
 
-# Scanner control endpoints
+        # Count pattern types
+        pattern_types = {"bull": 0, "bear": 0}
+        for pattern in patterns:
+            if "patterns" in pattern:
+                for p in pattern["patterns"]:
+                    if "pattern_type" in p:
+                        pattern_types[p["pattern_type"]] = pattern_types.get(p["pattern_type"], 0) + 1
+        
+        return {
+            "total_patterns": len(patterns),
+            "pattern_types": pattern_types,
+            "timeframe_distribution": timeframes,
+            "symbol_distribution": symbols,
+            "last_update": scanner_state.last_scan_time.isoformat() if scanner_state.last_scan_time else None
+        }
+    except Exception as e:
+        logger.error(f"Error calculating statistics: {str(e)}", exc_info=True)
+        return {"error": "Error calculating statistics", "message": str(e)}
+
+# Scanner control endpoint
 @app.get("/trigger-scan")
 async def trigger_scan():
     """Manually trigger a scan"""
@@ -152,11 +226,11 @@ async def trigger_scan():
         return {
             "status": "success",
             "message": "Scan triggered successfully",
-            "last_scan_time": last_scan_time.isoformat() if last_scan_time else None,
-            "patterns_found": len(recent_patterns)
+            "last_scan_time": scanner_state.last_scan_time.isoformat() if scanner_state.last_scan_time else None,
+            "patterns_found": len(scanner_state.recent_patterns)
         }
     except Exception as e:
-        logger.error(f"Scan trigger error: {str(e)}")
+        logger.error(f"Scan trigger error: {str(e)}", exc_info=True)
         return {
             "status": "error",
             "message": str(e)
@@ -181,13 +255,11 @@ async def notify_clients(data: Dict):
 # Scanner functionality
 async def run_scan():
     """Run a single market scan"""
-    global last_scan_time, recent_patterns, is_scanning
-    
-    if is_scanning:
+    if scanner_state.is_scanning:
         logger.warning("Scan already in progress, skipping...")
         return
     
-    is_scanning = True
+    scanner_state.is_scanning = True
     scan_start_time = datetime.now(timezone.utc)
     
     try:
@@ -196,44 +268,42 @@ async def run_scan():
         
         if results:
             # Update patterns list
-            recent_patterns = results + recent_patterns
-            recent_patterns = recent_patterns[:100]  # Keep only last 100 patterns
+            scanner_state.add_patterns(results)
             
             # Notify connected clients
             await notify_clients({
                 "type": "scan_update",
-                "data": results,
+                "data": scanner_state.recent_patterns,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
             
-            logger.info(f"Scan completed. Found {len(results)} patterns")
+            logger.info(f"Scan completed. Patterns found")
         else:
             logger.info("Scan completed. No patterns found")
-            
+        
         # Update scan history
         scan_duration = (datetime.now(timezone.utc) - scan_start_time).total_seconds()
-        scan_history.append({
+        scanner_state.scan_history.append({
             "timestamp": scan_start_time.isoformat(),
             "duration": scan_duration,
-            "patterns_found": len(results) if results else 0,
+            "patterns_found": len(scanner_state.recent_patterns),
             "status": "success"
         })
         
-        # Keep only last 100 scan records
-        if len(scan_history) > 100:
-            scan_history.pop(0)
-            
     except Exception as e:
-        logger.error(f"Error during scan: {str(e)}")
-        scan_history.append({
+        logger.error(f"Error during scan: {str(e)}", exc_info=True)
+        scan_duration = (datetime.now(timezone.utc) - scan_start_time).total_seconds()
+        scanner_state.scan_history.append({
             "timestamp": scan_start_time.isoformat(),
-            "duration": (datetime.now(timezone.utc) - scan_start_time).total_seconds(),
+            "duration": scan_duration,
             "status": "error",
             "error": str(e)
         })
     finally:
-        last_scan_time = datetime.now(timezone.utc)
-        is_scanning = False
+        scanner_state.last_scan_time = datetime.now(timezone.utc)
+        scanner_state.is_scanning = False
+        # Keep only last 100 scan records
+        scanner_state.scan_history = scanner_state.scan_history[-100:]
 
 async def scheduled_scan():
     """Wrapper for scheduled scan"""
