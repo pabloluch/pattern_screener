@@ -415,6 +415,9 @@ async function showWaveGraph(symbol, timeframe, patterns) {
 }
 
 function renderWaveChart(waveData, patterns) {
+    console.log('Wave Data:', waveData);
+    console.log('Patterns:', patterns);
+
     const ctx = document.getElementById('waveChart').getContext('2d');
     
     if (waveChart) {
@@ -422,7 +425,11 @@ function renderWaveChart(waveData, patterns) {
     }
 
     // Convert timestamps to readable format
-    const labels = waveData.timestamps.map(t => moment(t * 1000).format('MM-DD HH:mm'));
+    const labels = waveData.timestamps.map(t => {
+        const timestamp = t * (t < 10000000000 ? 1000 : 1);
+        const formatted = moment(timestamp).format('MM-DD HH:mm');
+        return formatted;
+    });
     
     // Create datasets for waves
     const datasets = [
@@ -442,20 +449,29 @@ function renderWaveChart(waveData, patterns) {
         }
     ];
 
-    // Add pattern points
+    // Log pattern points before adding them to chart
     patterns.forEach(pattern => {
         if (pattern.pattern_points) {
+            console.log(`Processing pattern points for ${pattern.pattern_type}:`, pattern.pattern_points);
+            
             // Parse pattern points from the text
             const points = pattern.pattern_points.split('\n');
             points.forEach(point => {
                 const match = point.match(/(\w+): ([\d-]+) UTC - Value: ([-\d.]+)/);
                 if (match) {
                     const [_, pointName, timestamp, value] = match;
+                    console.log(`Pattern point ${pointName}:`, {
+                        timestamp: timestamp,
+                        value: value
+                    });
+                    
                     // Find the closest timestamp index
                     const pointTime = moment(timestamp).unix();
-                    const pointIndex = waveData.timestamps.findIndex(t => t >= pointTime);
+                    const timestampIndex = waveData.timestamps.findIndex(t => t >= pointTime);
                     
-                    if (pointIndex !== -1) {
+                    console.log(`Found index ${timestampIndex} for timestamp ${pointTime}`);
+                    
+                    if (timestampIndex !== -1) {
                         // Add point to chart
                         const pointDataset = {
                             label: `${pointName} (${pattern.pattern_type})`,
@@ -464,7 +480,7 @@ function renderWaveChart(waveData, patterns) {
                             pointRadius: 8,
                             showLine: false
                         };
-                        pointDataset.data[pointIndex] = parseFloat(value);
+                        pointDataset.data[timestampIndex] = parseFloat(value);
                         datasets.push(pointDataset);
                     }
                 }
@@ -472,7 +488,10 @@ function renderWaveChart(waveData, patterns) {
         }
     });
 
-    // Create chart
+    // Log final datasets
+    console.log('Final datasets:', datasets);
+
+    // Create chart with debugging
     waveChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -500,7 +519,19 @@ function renderWaveChart(waveData, patterns) {
                 tooltip: {
                     enabled: true,
                     mode: 'index',
-                    intersect: false
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                label += context.parsed.y.toFixed(4);
+                            }
+                            return label;
+                        }
+                    }
                 },
                 legend: {
                     position: 'top'

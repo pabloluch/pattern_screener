@@ -189,6 +189,39 @@ async def debug_patterns_raw():
         }
     }
 
+@app.get("/debug/wave-compare/{symbol}/{timeframe}")
+async def compare_wave_calculations(symbol: str, timeframe: str):
+    """Compare wave calculations with pattern detection"""
+    try:
+        # Get wave data normally
+        wave_data = await get_wave_data(symbol, timeframe)
+        
+        # Get pattern data
+        scanner = AsyncWaveScanner()
+        results = await scanner.scan_market()
+        
+        # Extract pattern data for comparison
+        pattern_data = None
+        if results and symbol in results:
+            timeframe_data = results[symbol].get(timeframe, {})
+            pattern_data = {
+                "bull": timeframe_data.get("bull", {}),
+                "bear": timeframe_data.get("bear", {})
+            }
+        
+        return {
+            "wave_calculation": {
+                "fast_wave_sample": wave_data["fast_wave"][:5],
+                "slow_wave_sample": wave_data["slow_wave"][:5],
+                "timestamps_sample": wave_data["timestamps"][:5]
+            },
+            "pattern_data": pattern_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in comparison: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Pattern endpoints
 @app.get("/patterns")
 async def get_patterns():
@@ -199,39 +232,64 @@ async def get_patterns():
 async def get_wave_data(symbol: str, timeframe: str):
     """Get wave data and pattern points for a specific symbol and timeframe"""
     try:
+        logger.info(f"Fetching wave data for {symbol} {timeframe}")
+        
         # Use existing scanner instance
         scanner = AsyncWaveScanner()
         
         # Get the data using existing scan functionality
         async with MultiSessionMarketFetcher([timeframe]) as fetcher:
+            # Fetch candles
             all_candles = await fetcher.fetch_all_candles([symbol])
             
             if not all_candles or symbol not in all_candles:
+                logger.error(f"No candles found for {symbol}")
                 raise HTTPException(status_code=404, detail="No data found")
 
-            # Calculate waves using the same method as in pattern detection
-            wave_ind = WaveIndicator()
+            # Get the right timeframe data
             candles = all_candles[symbol].get(timeframe, [])
-            
             if not candles:
+                logger.error(f"No candles found for timeframe {timeframe}")
                 raise HTTPException(status_code=404, detail="No candles found")
 
-            # Calculate the wave values
+            # Log candle data for verification
+            logger.info(f"Got {len(candles)} candles for {symbol} {timeframe}")
+            logger.info(f"First candle: {candles[0].timestamp}, Last candle: {candles[-1].timestamp}")
+
+            # Calculate waves using the exact same method as in pattern detection
+            wave_ind = WaveIndicator(
+                ema_length1=9,
+                ema_length2=12,
+                sma_length=3,
+                scale_factor=0.015,
+                output_length=50
+            )
+            
+            # Calculate waves
             fast_wave, slow_wave = wave_ind.calculate(candles)
             
-            # Get timestamps from candles
+            logger.info(f"Calculated waves. Fast wave length: {len(fast_wave)}, Slow wave length: {len(slow_wave)}")
+            
+            # Get corresponding timestamps
             timestamps = [candle.timestamp for candle in candles[-len(fast_wave):]]
+            
+            # Log sample of wave values for verification
+            logger.info(f"Sample fast wave values: {fast_wave[:5]}")
+            logger.info(f"Sample slow wave values: {slow_wave[:5]}")
+            logger.info(f"Sample timestamps: {timestamps[:5]}")
 
             return {
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "timestamps": timestamps,
                 "fast_wave": fast_wave.tolist(),
-                "slow_wave": slow_wave.tolist()
+                "slow_wave": slow_wave.tolist(),
+                "candle_count": len(candles),
+                "wave_length": len(fast_wave)
             }
 
     except Exception as e:
-        logger.error(f"Error getting wave data: {str(e)}")
+        logger.error(f"Error getting wave data: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/patterns/statistics")
