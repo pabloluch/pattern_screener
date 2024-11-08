@@ -1,40 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wave Pattern Scanner Dashboard</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <title>Wave Pattern Scanner</title>
+    <!-- Add Recharts dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.0/Recharts.js"></script>
+    
     <style>
-        :root {
-            --primary-color: #2c3e50;
-            --secondary-color: #34495e;
-            --accent-color: #3498db;
-            --success-color: #2ecc71;
-            --danger-color: #e74c3c;
-            --text-color: #2c3e50;
-            --light-bg: #f5f6fa;
-            --card-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: var(--light-bg);
-            color: var(--text-color);
-        }
-
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
+            padding: 20px;
         }
 
         .header {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            gap: 20px;
             margin-bottom: 20px;
         }
 
@@ -42,187 +25,49 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            padding: 8px 16px;
-            border-radius: 20px;
-            background-color: white;
-            box-shadow: var(--card-shadow);
         }
 
         .status-dot {
-            width: 10px;
-            height: 10px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
+            background-color: #ccc;
         }
 
-        .status-dot.connected { background-color: var(--success-color); }
-        .status-dot.disconnected { background-color: var(--danger-color); }
-
-        .scan-table {
-            background: white;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 30px;
-            box-shadow: var(--card-shadow);
-        }
-
-        .scan-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid var(--light-bg);
-        }
-
-        .scan-timestamp {
-            font-weight: bold;
-            color: var(--accent-color);
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-        }
-
-        th, td {
-            padding: 8px;
-            text-align: left;
-            border: 1px solid #ddd;
-        }
-
-        th {
-            background-color: var(--primary-color);
-            color: white;
-        }
-
-        .pattern-cell {
-            text-align: center;
-            font-weight: bold;
-        }
-
-        .clickable-cell {
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        .clickable-cell:hover {
-            background-color: rgba(52, 152, 219, 0.1);
-        }
-
-        /* Modal styles */
         .modal {
             display: none;
             position: fixed;
-            z-index: 1000;
             left: 0;
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.4);
+            background-color: rgba(0,0,0,0.5);
         }
 
         .modal-content {
-            background-color: #fefefe;
-            margin: 5% auto;
+            background-color: white;
+            margin: 15% auto;
             padding: 20px;
-            border: 1px solid #888;
-            width: 90%;
-            max-width: 1200px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
+            width: 80%;
+            max-width: 800px;
         }
 
         .close {
-            color: #aaa;
-            font-size: 28px;
-            font-weight: bold;
+            float: right;
             cursor: pointer;
-        }
-
-        .close:hover {
-            color: black;
-        }
-
-        .graph-container {
-            height: 400px;
-            margin-bottom: 20px;
-        }
-
-        .pattern-details {
-            padding: 15px;
-            background-color: var(--light-bg);
-            border-radius: 5px;
-        }
-
-        .pattern-point {
-            display: flex;
-            justify-content: space-between;
-            margin: 5px 0;
-            padding: 5px;
-            background-color: white;
-            border-radius: 3px;
-        }
-
-        .collapse-button {
-            background: none;
-            border: none;
-            color: var(--accent-color);
-            cursor: pointer;
-            padding: 5px 10px;
-            font-size: 1.1em;
-        }
-
-        .collapsed .scan-content {
-            display: none;
-        }
-
-        .scan-summary {
-            display: flex;
-            gap: 20px;
-            font-size: 0.9em;
-            color: var(--secondary-color);
-        }
-
-        /* Arrow symbols */
-        .up-arrow::after {
-            content: "↑";
-            color: var(--success-color);
-        }
-
-        .down-arrow::after {
-            content: "↓";
-            color: var(--danger-color);
-        }
-
-        .double-up-arrow::after {
-            content: "↑↑";
-            color: var(--success-color);
-        }
-
-        .double-down-arrow::after {
-            content: "↓↓";
-            color: var(--danger-color);
+            font-size: 24px;
         }
 
         .loading {
             display: none;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: var(--card-shadow);
-            z-index: 1100;
+            text-align: center;
+            margin: 20px;
+        }
+
+        .graph-container {
+            margin: 20px 0;
+            height: 400px;
+            width: 100%;
         }
     </style>
 </head>
@@ -236,7 +81,12 @@
             </div>
         </div>
 
-        <!-- Graph Modal -->
+        <div id="loading" class="loading">
+            Loading wave data...
+        </div>
+
+        <div id="scan-history"></div>
+
         <div id="graphModal" class="modal">
             <div class="modal-content">
                 <div class="modal-header">
@@ -244,9 +94,7 @@
                     <span class="close">&times;</span>
                 </div>
                 <div class="modal-body">
-                    <div class="graph-container">
-                        <canvas id="waveChart"></canvas>
-                    </div>
+                    <div class="graph-container"></div>
                     <div class="pattern-details">
                         <h3>Pattern Points</h3>
                         <div id="patternPoints"></div>
@@ -254,384 +102,157 @@
                 </div>
             </div>
         </div>
-
-        <div id="loading" class="loading">
-            Loading wave data...
-        </div>
-
-        <div id="scan-history">
-            <!-- Scan tables will be inserted here -->
-        </div>
     </div>
 
     <script>
-        let waveChart = null;
-        const websocketUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
-        let ws;
-
-        function initializeWebSocket() {
-            ws = new WebSocket(websocketUrl);
+        // Wave Pattern Graph Component
+        const WavePatternGraph = ({ data }) => {
+            const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
             
-            ws.onopen = function() {
-                document.getElementById('status-dot').className = 'status-dot connected';
-                document.getElementById('status-text').textContent = 'Connected';
-            };
-            
-            ws.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                addNewScanTable(data.data, data.timestamp);
-            };
-            
-            ws.onclose = function() {
-                document.getElementById('status-dot').className = 'status-dot disconnected';
-                document.getElementById('status-text').textContent = 'Disconnected';
-                setTimeout(initializeWebSocket, 5000);
-            };
-        }
+            // Format data for Recharts
+            const formattedData = data.timestamps.map((timestamp, index) => ({
+                timestamp,
+                fastWave: data.fast_wave[index],
+                slowWave: data.slow_wave[index]
+            })).reverse();
 
-        function createPatternIndicator(patterns) {
-            const bullFast = patterns.some(p => p.pattern_type === 'bull' && p.wave_type === 'fast_wave');
-            const bullSlow = patterns.some(p => p.pattern_type === 'bull' && p.wave_type === 'slow_wave');
-            const bearFast = patterns.some(p => p.pattern_type === 'bear' && p.wave_type === 'fast_wave');
-            const bearSlow = patterns.some(p => p.pattern_type === 'bear' && p.wave_type === 'slow_wave');
+            return React.createElement(
+                'div',
+                { style: { width: '100%', height: '100%' } },
+                React.createElement(
+                    ResponsiveContainer,
+                    null,
+                    React.createElement(
+                        LineChart,
+                        {
+                            data: formattedData,
+                            margin: { top: 5, right: 30, left: 20, bottom: 5 }
+                        },
+                        React.createElement(CartesianGrid, { strokeDasharray: '3 3' }),
+                        React.createElement(XAxis, {
+                            dataKey: 'timestamp',
+                            tickFormatter: (value) => {
+                                const date = new Date(value);
+                                return `${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+                            }
+                        }),
+                        React.createElement(YAxis),
+                        React.createElement(Tooltip, {
+                            labelFormatter: (value) => new Date(value).toUTCString(),
+                            formatter: (value) => value.toFixed(4)
+                        }),
+                        React.createElement(Legend),
+                        React.createElement(Line, {
+                            type: 'monotone',
+                            dataKey: 'fastWave',
+                            stroke: '#8884d8',
+                            name: 'Fast Wave',
+                            dot: false
+                        }),
+                        React.createElement(Line, {
+                            type: 'monotone',
+                            dataKey: 'slowWave',
+                            stroke: '#82ca9d',
+                            name: 'Slow Wave',
+                            dot: false
+                        })
+                    )
+                )
+            );
+        };
 
-            let indicator = '';
-            
-            if (bullFast && bullSlow) indicator += '<span class="double-up-arrow"></span>';
-            else if (bullFast || bullSlow) indicator += '<span class="up-arrow"></span>';
-            
-            if (indicator && (bearFast || bearSlow)) indicator += '/';
-            
-            if (bearFast && bearSlow) indicator += '<span class="double-down-arrow"></span>';
-            else if (bearFast || bearSlow) indicator += '<span class="down-arrow"></span>';
-            
-            return indicator || '-';
-        }
+        // WebSocket connection
+        const ws = new WebSocket(`ws://${window.location.host}/ws`);
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const modal = document.getElementById('graphModal');
+        const closeBtn = document.querySelector('.close');
+        const graphContainer = document.querySelector('.graph-container');
+        let currentSymbol = null;
+        let currentTimeframe = null;
 
-        function createPatternCell(symbolData, tf, patterns) {
-            if (!patterns) return '<td class="pattern-cell">-</td>';
-            
-            const indicator = createPatternIndicator(patterns);
-            return `
-                <td class="pattern-cell clickable-cell" 
-                    onclick="showWaveGraph('${symbolData.symbol}', '${tf}', ${JSON.stringify(patterns).replace(/"/g, '&quot;')})">
-                    ${indicator}
-                </td>
-            `;
-        }
+        ws.onopen = () => {
+            statusDot.style.backgroundColor = '#4CAF50';
+            statusText.textContent = 'Connected';
+        };
 
-        function addNewScanTable(patterns, timestamp) {
-            // Group patterns by symbol
-            const symbolPatterns = {};
-            patterns.forEach(pattern => {
-                if (!symbolPatterns[pattern.symbol]) {
-                    symbolPatterns[pattern.symbol] = {
-                        symbol: pattern.symbol,
-                        max_position: pattern.max_position,
-                        timeframes: {}
-                    };
-                }
-                if (!symbolPatterns[pattern.symbol].timeframes[pattern.timeframe]) {
-                    symbolPatterns[pattern.symbol].timeframes[pattern.timeframe] = [];
-                }
-                symbolPatterns[pattern.symbol].timeframes[pattern.timeframe].push(pattern);
-            });
+        ws.onclose = () => {
+            statusDot.style.backgroundColor = '#ccc';
+            statusText.textContent = 'Disconnected';
+        };
 
-            // Get all unique timeframes
-            const timeframes = [...new Set(patterns.map(p => p.timeframe))].sort();
-
-            // Create new scan table
-            const scanDiv = document.createElement('div');
-            scanDiv.className = 'scan-table';
-            
-            const scanTime = moment(timestamp).format('YYYY-MM-DD HH:mm:ss');
-            const patternCount = Object.keys(symbolPatterns).length;
-            
-            scanDiv.innerHTML = `
-                <div class="scan-header">
-                    <button class="collapse-button" onclick="toggleScanTable(this)">▼</button>
-                    <span class="scan-timestamp">Scan Time: ${scanTime}</span>
-                    <div class="scan-summary">
-                        <span>Symbols with patterns: ${patternCount}</span>
-                        <span>Timeframes: ${timeframes.join(', ')}</span>
-                    </div>
-                </div>
-                <div class="scan-content">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Symbol</th>
-                                <th>Max Position</th>
-                                ${timeframes.map(tf => `<th>${tf}</th>`).join('')}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${Object.values(symbolPatterns).map(symbolData => `
-                                <tr>
-                                    <td>${symbolData.symbol}</td>
-                                    <td>${symbolData.max_position.toLocaleString()}</td>
-                                    ${timeframes.map(tf => 
-                                        createPatternCell(symbolData, tf, symbolData.timeframes[tf])
-                                    ).join('')}
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-
-            // Add new scan table at the top of the history
-            const historyDiv = document.getElementById('scan-history');
-            historyDiv.insertBefore(scanDiv, historyDiv.firstChild);
-        }
-
-// Update the showWaveGraph function in index.html
-async function showWaveGraph(symbol, timeframe, patterns) {
-    const modal = document.getElementById('graphModal');
-    const loading = document.getElementById('loading');
-    const title = document.getElementById('graphTitle');
-    
-    title.textContent = `${symbol} - ${timeframe} Wave Pattern`;
-    loading.style.display = 'block';
-    modal.style.display = 'block';
-    
-    try {
-        const response = await fetch(`/wave-data/${symbol}/${timeframe}`);
-        const waveData = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(waveData.detail || 'Failed to fetch wave data');
-        }
-
-        renderWaveChart(waveData, patterns);
-        displayPatternPoints(patterns);
-        
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error loading wave data: ' + error.message);
-    } finally {
-        loading.style.display = 'none';
-    }
-}
-
-
-
-function renderWaveChart(waveData, patterns) {
-        const ctx = document.getElementById('waveChart').getContext('2d');
-        
-        if (waveChart) {
-            waveChart.destroy();
-        }
-
-        // Just use the timestamps directly from waveData without any manipulation
-        const labels = waveData.timestamps.map(t => moment.unix(t).format('MM-DD HH:mm'));
-        
-        const datasets = [
-            // Zero line
-            {
-                label: 'Zero Line',
-                data: Array(waveData.timestamps.length).fill(0),
-                borderColor: 'rgb(0, 0, 0)',
-                borderWidth: 2,
-                fill: false,
-                tension: 0,
-                order: 1
-            },
-            // Fast Wave
-            {
-                label: 'Fast Wave',
-                data: waveData.fast_wave,
-                borderColor: 'rgb(52, 152, 219)',
-                borderWidth: 1.5,
-                fill: false,
-                tension: 0.1,
-                order: 2
-            },
-            // Slow Wave
-            {
-                label: 'Slow Wave',
-                data: waveData.slow_wave,
-                borderColor: 'rgb(231, 76, 60)',
-                borderWidth: 1.5,
-                fill: false,
-                tension: 0.1,
-                order: 2
+        ws.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'scan_update') {
+                updateScanHistory(data.data);
             }
-        ];
+        };
 
-        // Add pattern points
-        patterns.forEach(pattern => {
-            if (pattern.pattern_points) {
-                const points = pattern.pattern_points.split('\n');
-                points.forEach(point => {
-                    const match = point.match(/(\w+): ([\d-]+) UTC - Value: ([-\d.]+)/);
-                    if (match) {
-                        const [_, pointName, timestamp, value] = match;
-                        // Find the exact timestamp in our data
-                        const pointTime = moment(timestamp).unix();
-                        const pointIndex = waveData.timestamps.indexOf(pointTime);
-                        
-                        if (pointIndex !== -1) {
-                            // Add point marker
-                            const pointData = Array(waveData.timestamps.length).fill(null);
-                            pointData[pointIndex] = parseFloat(value);
-                            
-                            datasets.push({
-                                label: `${pointName} (${pattern.pattern_type})`,
-                                data: pointData,
-                                pointBackgroundColor: pattern.pattern_type === 'bull' ? 'rgb(46, 204, 113)' : 'rgb(231, 76, 60)',
-                                pointBorderColor: 'white',
-                                pointBorderWidth: 2,
-                                pointRadius: 8,
-                                pointStyle: 'circle',
-                                showLine: false,
-                                order: 3
-                            });
+        function updateScanHistory(patterns) {
+            const historyDiv = document.getElementById('scan-history');
+            historyDiv.innerHTML = patterns.map(pattern => {
+                const timestamp = new Date(pattern.timestamp).toLocaleString();
+                return `
+                    <div class="pattern" onclick="showGraph('${pattern.symbol}', '${pattern.timeframe}')">
+                        <strong>${pattern.symbol}</strong> - ${pattern.timeframe} - ${pattern.pattern_type} 
+                        ${pattern.wave_type} - ${timestamp}
+                    </div>
+                `;
+            }).join('');
+        }
 
-                            // Add vertical line
-                            datasets.push({
-                                label: `${pointName} Line`,
-                                data: Array(waveData.timestamps.length).fill(null).map((_, i) => 
-                                    i === pointIndex ? [-100, parseFloat(value), 100] : null
-                                ),
-                                borderColor: pattern.pattern_type === 'bull' ? 
-                                    'rgba(46, 204, 113, 0.2)' : 'rgba(231, 76, 60, 0.2)',
-                                borderWidth: 1,
-                                borderDash: [5, 5],
-                                fill: false,
-                                pointRadius: 0,
-                                showLine: true,
-                                order: 0
-                            });
-                        }
+        async function showGraph(symbol, timeframe) {
+            currentSymbol = symbol;
+            currentTimeframe = timeframe;
+            document.getElementById('loading').style.display = 'block';
+            modal.style.display = 'block';
+            document.getElementById('graphTitle').textContent = 
+                `Wave Pattern Analysis - ${symbol} ${timeframe}`;
+
+            try {
+                const response = await fetch(`/wave-data/${symbol}/${timeframe}`);
+                const data = await response.json();
+                
+                // Render the graph
+                const root = ReactDOM.createRoot(graphContainer);
+                root.render(React.createElement(WavePatternGraph, { data: data }));
+                
+                // Update pattern points
+                const patternPoints = document.getElementById('patternPoints');
+                if (data.patterns) {
+                    patternPoints.innerHTML = formatPatternPoints(data.patterns);
+                }
+            } catch (error) {
+                console.error('Error fetching wave data:', error);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function formatPatternPoints(patterns) {
+            let html = '';
+            ['bull', 'bear'].forEach(type => {
+                ['fast_wave', 'slow_wave'].forEach(wave => {
+                    if (patterns[type]?.[wave]?.pattern_points) {
+                        html += `<h4>${type.toUpperCase()} ${wave.replace('_', ' ')}</h4>`;
+                        html += `<pre>${patterns[type][wave].pattern_points}</pre>`;
                     }
                 });
-            }
-        });
-
-        waveChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: datasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: {
-                    intersect: false,
-                    mode: 'index'
-                },
-                scales: {
-                    x: {
-                        display: true,
-                        title: {
-                            display: true,
-                            text: 'Time'
-                        },
-                        grid: {
-                            color: 'rgba(0, 0, 0, 0.1)'
-                        },
-                        ticks: {
-                            maxRotation: 45,
-                            minRotation: 45,
-                            autoSkip: true,
-                            maxTicksLimit: 15
-                        }
-                    },
-                    y: {
-                        display: true,
-                        title: {
-                            display: true,
-                            text: 'Wave Value'
-                        },
-                        min: -100,
-                        max: 100,
-                        grid: {
-                            color: 'rgba(0, 0, 0, 0.1)',
-                            zeroLineColor: 'rgba(0, 0, 0, 0.25)',
-                            zeroLineWidth: 2
-                        }
-                    }
-                },
-                plugins: {
-                    tooltip: {
-                        enabled: true,
-                        mode: 'index',
-                        intersect: false,
-                        callbacks: {
-                            label: function(context) {
-                                let label = context.dataset.label || '';
-                                if (label) {
-                                    label += ': ';
-                                }
-                                if (context.parsed.y !== null) {
-                                    label += context.parsed.y.toFixed(2);
-                                }
-                                return label;
-                            }
-                        }
-                    },
-                    legend: {
-                        position: 'top',
-                        labels: {
-                            filter: function(item) {
-                                return !item.text.includes('Line');
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-        function displayPatternPoints(patterns) {
-            const container = document.getElementById('patternPoints');
-            container.innerHTML = patterns.map(pattern => `
-                <div class="pattern-group">
-                    <h4>${pattern.pattern_type.toUpperCase()} Pattern - ${pattern.wave_type}</h4>
-                    <div class="pattern-points-detail">
-                        ${pattern.pattern_points}
-                    </div>
-                </div>
-            `).join('<hr>');
+            });
+            return html;
         }
 
-        function toggleScanTable(button) {
-            const scanTable = button.closest('.scan-table');
-            scanTable.classList.toggle('collapsed');
-            button.textContent = scanTable.classList.contains('collapsed') ? '▶' : '▼';
-        }
+        // Modal close button
+        closeBtn.onclick = () => {
+            modal.style.display = 'none';
+        };
 
-        // Add modal close functionality
-        document.querySelector('.close').onclick = function() {
-            document.getElementById('graphModal').style.display = 'none';
-        }
-
-        window.onclick = function(event) {
-            const modal = document.getElementById('graphModal');
+        // Close modal when clicking outside
+        window.onclick = (event) => {
             if (event.target == modal) {
                 modal.style.display = 'none';
             }
-        }
-
-        // Initialize
-        async function initialize() {
-            initializeWebSocket();
-            
-            // Fetch initial patterns
-            try {
-                const response = await fetch('/patterns');
-                const patterns = await response.json();
-                if (patterns.length > 0) {
-                    addNewScanTable(patterns, new Date().toISOString());
-                }
-            } catch (error) {
-                console.error('Error fetching initial patterns:', error);
-            }
-        }
-
-        initialize();
+        };
     </script>
 </body>
 </html>

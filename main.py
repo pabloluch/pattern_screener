@@ -230,7 +230,7 @@ async def get_patterns():
 
 @app.get("/wave-data/{symbol}/{timeframe}")
 async def get_wave_data(symbol: str, timeframe: str):
-    """Get wave data and pattern points for a specific symbol and timeframe"""
+    """Get wave data for a specific symbol and timeframe"""
     try:
         logger.info(f"Fetching wave data for {symbol} {timeframe}")
         
@@ -242,6 +242,7 @@ async def get_wave_data(symbol: str, timeframe: str):
             minutes = int(timeframe.replace('Hour', '')) * 60
         
         if minutes is None:
+            logger.error(f"Invalid timeframe format: {timeframe}")
             raise HTTPException(status_code=400, detail="Invalid timeframe format")
 
         # Get base timeframe using same logic as scanner
@@ -276,27 +277,63 @@ async def get_wave_data(symbol: str, timeframe: str):
                 output_length=50
             )
             
-            # Calculate waves
-            fast_wave, slow_wave = wave_ind.calculate(candles)
-            
-            logger.info(f"Calculated waves. Fast wave length: {len(fast_wave)}, Slow wave length: {len(slow_wave)}")
-            logger.info(f"Sample fast wave values: {fast_wave[:5]}")
-            logger.info(f"Sample slow wave values: {slow_wave[:5]}")
+            # Calculate waves with timestamps
+            try:
+                fast_wave, slow_wave, wave_timestamps = wave_ind.calculate(candles)
+                
+                if len(fast_wave) == 0 or len(slow_wave) == 0 or len(wave_timestamps) == 0:
+                    logger.error("Wave calculation returned empty arrays")
+                    raise HTTPException(status_code=500, detail="Wave calculation failed")
+                
+                logger.info(f"Calculated waves. Fast wave length: {len(fast_wave)}, "
+                          f"Slow wave length: {len(slow_wave)}, "
+                          f"Timestamps length: {len(wave_timestamps)}")
+                
+                # Format timestamps for frontend
+                formatted_timestamps = []
+                for ts in wave_timestamps:
+                    try:
+                        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                        formatted_timestamps.append(dt.strftime('%Y-%m-%d %H:%M:%S'))
+                    except Exception as e:
+                        logger.error(f"Error formatting timestamp {ts}: {str(e)}")
+                        continue
 
-            # Get timestamps from the candles corresponding to wave data
-            timestamps = [candle.timestamp for candle in candles[-len(fast_wave):]]
-            logger.info(f"Sample timestamps: {timestamps[:5]}")
+                # Validate data consistency
+                if not (len(formatted_timestamps) == len(fast_wave) == len(slow_wave)):
+                    logger.error("Inconsistent lengths in calculated data")
+                    raise HTTPException(
+                        status_code=500, 
+                        detail="Inconsistent data lengths in calculation results"
+                    )
 
-            return {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "timestamps": timestamps,
-                "fast_wave": fast_wave.tolist(),
-                "slow_wave": slow_wave.tolist(),
-                "candle_count": len(candles),
-                "wave_length": len(fast_wave)
-            }
+                # Prepare response data
+                response_data = {
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "timestamps": formatted_timestamps,
+                    "fast_wave": fast_wave.tolist(),
+                    "slow_wave": slow_wave.tolist(),
+                    "candle_count": len(candles),
+                    "wave_length": len(fast_wave)
+                }
 
+                # Add some debug information
+                logger.debug(f"Sample fast wave values: {fast_wave[:5]}")
+                logger.debug(f"Sample slow wave values: {slow_wave[:5]}")
+                logger.debug(f"Sample timestamps: {formatted_timestamps[:5]}")
+
+                return response_data
+
+            except Exception as calc_error:
+                logger.error(f"Error in wave calculation: {str(calc_error)}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error calculating wave data: {str(calc_error)}"
+                )
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting wave data: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

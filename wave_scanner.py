@@ -22,7 +22,7 @@ class AsyncWaveScanner:
         self.converter = TimeframeConverter()
         self.wave_indicator = WaveIndicator()
         self.logger = logging.getLogger(__name__)
-        self.min_position_size = 50000
+        self.min_position_size = 10000
         self.timeframes_minutes = [1, 2, 3, 5, 10, 15, 30, 45, 60, 120, 180]
 
     @timing_decorator
@@ -71,17 +71,14 @@ class AsyncWaveScanner:
                 continue
 
             # Calculate wave indicators for this timeframe
-            fast_wave, slow_wave = self.wave_indicator.calculate(timeframe_candles)
-            
-            # Extract timestamps from candles
-            timestamps = np.array([candle.timestamp for candle in timeframe_candles])
+            fast_wave, slow_wave, wave_timestamps = self.wave_indicator.calculate(timeframe_candles)  # Updated to receive timestamps
             
             # Create WaveData object with timestamps
             wave_data = WaveData(
                 timeframe=timeframe,
                 fast_wave=fast_wave,
                 slow_wave=slow_wave,
-                timestamps=timestamps  # Add timestamps here
+                timestamps=wave_timestamps  # Use the timestamps from calculate method
             )
             
             # Run pattern detection in thread pool
