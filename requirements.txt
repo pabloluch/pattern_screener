@@ -1,49 +1,25 @@
-# requirements.txt
+# Web Framework and Server
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
 
-# Core Web Framework
-fastapi==0.104.1
-uvicorn==0.24.0
+# Core Scientific Libraries
+numpy==1.26.3
+pandas==2.1.4
+scipy==1.11.4
 
-# Async HTTP
+# HTTP and Async
 aiohttp==3.9.1
-websockets==11.0.3
-
-# Data Processing
-numpy==1.26.2
-pandas==2.1.3
-scipy==1.11.3  # Required for wave pattern detection and signal processing
-
-# Time Management
-schedule==1.2.0
-python-dateutil==2.8.2
-
-# Utilities
-python-dotenv==1.0.0
-typing-extensions==4.8.0
-
-# Excel Support (if you want to keep Excel functionality)
-openpyxl==3.1.2
-
-# Static File Serving
-aiofiles==23.2.1  # For serving static files with FastAPI
-
-# Data Validation
-pydantic==2.5.2  # FastAPI dependency for data validation
-
-# Logging and Monitoring
-logging==0.4.9.6
-
-# Threading and Async Support
 asyncio==3.4.3
 
-# Optional but recommended for production
-gunicorn==21.2.0  # Production server
-uvloop==0.19.0  # Fast event loop implementation
-httptools==0.6.1  # Fast HTTP parsing
+# Data Processing and Excel
+openpyxl==3.1.2
+python-dateutil==2.8.2
 
-# Development Tools (optional)
-black==23.11.0  # Code formatting
-isort==5.12.0   # Import sorting
-flake8==6.1.0   # Code linting
-pytest==7.4.3   # Testing
-pytest-asyncio==0.21.1  # Async testing support
+# Utility
+typing-extensions==4.9.0
+python-dotenv==1.0.0
+
+# Optional but recommended
+pydantic==2.5.3  # For data validation
+loguru==0.7.2    # For better logging

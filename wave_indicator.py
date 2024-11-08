@@ -9,7 +9,7 @@ class WaveData:
     timeframe: str
     fast_wave: np.ndarray  # Last 50 values
     slow_wave: np.ndarray  # Last 50 values
-    timestamps: np.ndarray # Last 50 timestamps, corresponding to the wave values
+    timestamps: Optional[np.ndarray] = None
 
 class WaveIndicator:
     def __init__(
@@ -65,56 +65,57 @@ class WaveIndicator:
         return np.concatenate([padding, sma])
     
     def calculate_heikin_ashi(self, candles: List[AggregatedCandle]) -> np.ndarray:
-        """Calculate Heikin-Ashi HLC3 values using AggregatedCandle data"""
+        """Calculate Heikin-Ashi in chronological order"""
+        # This function now receives candles in chronological order
         ha_close = np.zeros(len(candles))
         ha_open = np.zeros(len(candles))
         ha_high = np.zeros(len(candles))
         ha_low = np.zeros(len(candles))
         
-        # Calculate first Heikin-Ashi candle
+        # First candle
         ha_close[0] = (candles[0].open + candles[0].high + candles[0].low + candles[0].close) / 4
         ha_open[0] = candles[0].open
         ha_high[0] = candles[0].high
         ha_low[0] = candles[0].low
         
-        # Calculate subsequent Heikin-Ashi candles
+        # Calculate subsequent candles
         for i in range(1, len(candles)):
             ha_close[i] = (candles[i].open + candles[i].high + candles[i].low + candles[i].close) / 4
             ha_open[i] = (ha_open[i-1] + ha_close[i-1]) / 2
             ha_high[i] = max(candles[i].high, ha_open[i], ha_close[i])
             ha_low[i] = min(candles[i].low, ha_open[i], ha_close[i])
         
-        # Calculate HLC3 for Heikin-Ashi candles
         return (ha_high + ha_low + ha_close) / 3
 
     def calculate(self, candles: List[AggregatedCandle]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Calculate both Fast and Slow Wave indicator values using AggregatedCandle data
-        
-        Returns:
-            Tuple containing:
-            - fast_wave: numpy array of last output_length values
-            - slow_wave: numpy array of last output_length values
-            - timestamps: numpy array of corresponding timestamps
-        """
+        """Optimize internal calculations while preserving output order"""
         if not candles:
             self.logger.warning("No candles provided for calculation")
             return np.array([]), np.array([]), np.array([])
+
+        # Work with chronological order internally for calculations
+        calc_candles = list(reversed(candles))  # Single reversal for internal work
         
-        # Reverse candles to chronological order for calculation
-        chronological_candles = list(reversed(candles))
+        # Calculate indicators in chronological order
+        hlc3 = self.calculate_heikin_ashi(calc_candles)
+        x = self.calculate_ema(hlc3, self.ema_length1)
+        abs_diff = np.abs(hlc3 - x)
+        y = self.calculate_ema(abs_diff, self.ema_length1)
+        y = y + self.epsilon
+        z = (hlc3 - x) / (self.scale_factor * y)
+        fast_wave = self.calculate_ema(z, self.ema_length2)
+        slow_wave = self.calculate_sma(fast_wave, self.sma_length)
         
-        # Store timestamps in chronological order
-        timestamps = np.array([candle.timestamp for candle in chronological_candles])
+        # Replace any NaN values
+        fast_wave = np.nan_to_num(fast_wave, 0)
+        slow_wave = np.nan_to_num(slow_wave, 0)
         
-        # Rest of the wave calculation code remains the same...
-        
-        # Reverse back to match the original order (newest first)
+        # Reverse back to newest-first order for output
         fast_wave = fast_wave[::-1]
         slow_wave = slow_wave[::-1]
-        timestamps = timestamps[::-1]
+        timestamps = np.array([candle.timestamp for candle in candles])  # Already in newest-first order
         
-        # Return only the last output_length values with corresponding timestamps
+        # Return latest values first
         return (
             fast_wave[:self.output_length],
             slow_wave[:self.output_length],
@@ -128,11 +129,20 @@ class WaveIndicator:
         Args:
             timeframe_candles: Dictionary with timeframe as key and list of AggregatedCandle as value
         Returns:
-            Dictionary with timeframe as key and WaveData as value
+            Dictionary with timeframe as key and WaveData as value containing waves and timestamps
         """
         wave_data = {}
         for timeframe, candles in timeframe_candles.items():
-            fast_wave, slow_wave, timestamps = self.calculate(candles)  # Updated to receive timestamps
+            if not candles:
+                self.logger.warning(f"No candles provided for timeframe {timeframe}")
+                continue
+                
+            fast_wave, slow_wave, timestamps = self.calculate(candles)
+            
+            if len(fast_wave) == 0 or len(slow_wave) == 0:
+                self.logger.warning(f"No wave data calculated for timeframe {timeframe}")
+                continue
+                
             wave_data[timeframe] = WaveData(
                 timeframe=timeframe,
                 fast_wave=fast_wave,
@@ -205,17 +215,17 @@ async def main():
                       f"{candle.low:.2f}, {candle.close:.2f}\n")
 
             # Calculate wave indicators
-            fast_wave, slow_wave, timestamps = wave_ind.calculate(candles)
-
+            fast_wave, slow_wave = wave_ind.calculate(candles)
+            
             # Print newest few wave values
             print(f"\nNewest 5 Wave values ({timeframe_name}):")
             print("Timestamp (UTC) | Fast Wave | Slow Wave")
             print("-" * 45)
-
-            # Create a list of timestamps from the calculation
-            timestamps = [datetime.fromtimestamp(ts, tz=timezone.utc) 
-                        for ts in timestamps[:5]]
-
+            
+            # Create a list of timestamps from the candles
+            timestamps = [datetime.fromtimestamp(c.timestamp, tz=timezone.utc) 
+                        for c in candles[:5]]
+            
             # Print the wave values with their corresponding timestamps
             for dt, fast, slow in zip(timestamps, fast_wave[:5], slow_wave[:5]):
                 print(f"{dt.strftime('%Y-%m-%d %H:%M')} | {fast:8.4f} | {slow:8.4f}")

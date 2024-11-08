@@ -3,12 +3,10 @@ import asyncio
 import numpy as np
 import pandas as pd
 from datetime import datetime
-import os
-from openpyxl import load_workbook
 from market_data_fetcher import MultiSessionMarketFetcher
 from combined_jttw_pattern import JTTWPattern
 from timeframe_converter import TimeframeConverter
-from typing import List, Dict, Tuple
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 from timing_decorator import timing_decorator, timing_stats
 from wave_indicator import WaveIndicator, WaveData
@@ -22,38 +20,84 @@ class AsyncWaveScanner:
         self.converter = TimeframeConverter()
         self.wave_indicator = WaveIndicator()
         self.logger = logging.getLogger(__name__)
-        self.min_position_size = 10000
+        self.min_position_size = 50000
         self.timeframes_minutes = [1, 2, 3, 5, 10, 15, 30, 45, 60, 120, 180]
 
     @timing_decorator
-    async def scan_market(self):
-        async with timing_stats.measure_total_time_async():
-            async with MultiSessionMarketFetcher(self.timeframes) as fetcher:
-                pairs = await fetcher.fetch_perpetual_pairs()
-                if not pairs:
-                    self.logger.error("No pairs fetched from the exchange")
-                    return
+    async def scan_market(self) -> Dict[str, Any]:
+        """
+        Main method to scan the market for wave patterns.
+        Returns a structured dictionary containing scan results and statistics.
+        """
+        try:
+            async with timing_stats.measure_total_time_async():
+                async with MultiSessionMarketFetcher(self.timeframes) as fetcher:
+                    # Fetch market pairs
+                    pairs = await fetcher.fetch_perpetual_pairs()
+                    if not pairs:
+                        return {
+                            "status": "error",
+                            "message": "No pairs fetched from the exchange",
+                            "data": None
+                        }
 
-                position_limits = await fetcher.fetch_position_limits(pairs)
-                eligible_pairs = {
-                    symbol: limit_info
-                    for symbol, limit_info in position_limits.items()
-                    if limit_info.max_position > self.min_position_size
-                }
+                    # Get position limits and filter eligible pairs
+                    position_limits = await fetcher.fetch_position_limits(pairs)
+                    eligible_pairs = {
+                        symbol: limit_info
+                        for symbol, limit_info in position_limits.items()
+                        if limit_info.max_position > self.min_position_size
+                    }
 
-                all_candles = await fetcher.fetch_all_candles(list(eligible_pairs.keys()))
-                return await self.analyze_all_symbols(eligible_pairs, all_candles)
-            
+                    if not eligible_pairs:
+                        return {
+                            "status": "error",
+                            "message": "No eligible pairs found",
+                            "data": None
+                        }
+
+                    # Fetch candle data
+                    all_candles = await fetcher.fetch_all_candles(list(eligible_pairs.keys()))
+                    
+                    # Monitor candle reception
+                    self._monitor_candles(eligible_pairs, all_candles)
+
+                    # Analyze patterns
+                    all_results = await self.analyze_all_symbols(eligible_pairs, all_candles)
+
+                    # Generate response data
+                    response_data = self._generate_response(all_results, position_limits)
+                    
+                    return {
+                        "status": "success",
+                        "message": "Market scan completed successfully",
+                        "data": response_data
+                    }
+
+        except Exception as e:
+            self.logger.error(f"Error in market scan: {str(e)}")
+            return {
+                "status": "error",
+                "message": f"Market scan failed: {str(e)}",
+                "data": None
+            }
+
+    def _monitor_candles(self, eligible_pairs: Dict, all_candles: Dict) -> None:
+        """Monitor candle reception for all eligible pairs"""
+        for symbol in eligible_pairs.keys():
+            timeframe_data = all_candles.get(symbol, {})
+            for timeframe in self.timeframes:
+                candles = timeframe_data.get(timeframe, [])
+                timing_stats.monitor_candles(symbol, timeframe, len(candles))
+
     async def analyze_all_symbols(self, eligible_pairs: Dict, all_candles: Dict) -> Dict[str, Dict[str, dict]]:
-        """
-        Analyze wave patterns for each eligible symbol across multiple timeframes.
-        """
+        """Analyze wave patterns for each eligible symbol"""
         all_results = {}
+        
         for symbol, timeframe_data in all_candles.items():
             if symbol not in eligible_pairs:
                 continue
 
-            # Pass the entire timeframe_data dictionary for this symbol
             patterns = await self.analyze_symbol(symbol, timeframe_data)
             if any(pattern for pattern in patterns.values()):
                 all_results[symbol] = patterns
@@ -61,6 +105,7 @@ class AsyncWaveScanner:
         return all_results
 
     async def analyze_symbol(self, symbol: str, timeframe_data: Dict[str, List]) -> Dict[str, dict]:
+        """Analyze patterns for a specific symbol across all timeframes"""
         results = {}
         
         for minutes in self.timeframes_minutes:
@@ -70,31 +115,25 @@ class AsyncWaveScanner:
             if not timeframe_candles:
                 continue
 
-            # Calculate wave indicators for this timeframe
-            fast_wave, slow_wave, wave_timestamps = self.wave_indicator.calculate(timeframe_candles)  # Updated to receive timestamps
+            # Calculate wave indicators
+            fast_wave, slow_wave, timestamps = self.wave_indicator.calculate(timeframe_candles)
             
-            # Create WaveData object with timestamps
+            if len(fast_wave) == 0 or len(slow_wave) == 0:
+                continue
+            
             wave_data = WaveData(
                 timeframe=timeframe,
                 fast_wave=fast_wave,
                 slow_wave=slow_wave,
-                timestamps=wave_timestamps  # Use the timestamps from calculate method
+                timestamps=timestamps
             )
             
-            # Run pattern detection in thread pool
-            bull_patterns = await asyncio.to_thread(
-                self.bull_detector.detect_patterns, 
-                wave_data
-            )
-            
-            bear_patterns = await asyncio.to_thread(
-                self.bear_detector.detect_patterns, 
-                wave_data
-            )
+            # Detect patterns
+            bull_patterns = await asyncio.to_thread(self.bull_detector.detect_patterns, wave_data)
+            bear_patterns = await asyncio.to_thread(self.bear_detector.detect_patterns, wave_data)
 
-            # Store results if patterns are found
             if bull_patterns["fast_wave"] or bull_patterns["slow_wave"] or \
-            bear_patterns["fast_wave"] or bear_patterns["slow_wave"]:
+               bear_patterns["fast_wave"] or bear_patterns["slow_wave"]:
                 results[timeframe] = {
                     "bull": bull_patterns,
                     "bear": bear_patterns,
@@ -106,66 +145,135 @@ class AsyncWaveScanner:
 
         return results
 
-    def format_patterns_by_symbol(self, all_results: Dict[str, Dict[str, dict]], position_limits: Dict) -> str:
-        formatted_output = []
+    def _generate_response(self, all_results: Dict, position_limits: Dict) -> Dict[str, Any]:
+        """Generate structured response data"""
+        return {
+            "summary": self._create_summary_data(all_results, position_limits),
+            "detailed_results": self._format_detailed_results(all_results, position_limits),
+            "statistics": self._generate_statistics(all_results),
+            "performance_metrics": self._get_performance_metrics()
+        }
 
+    def _create_summary_data(self, all_results: Dict, position_limits: Dict) -> List[Dict]:
+        """Create summary data from results"""
+        df = self.create_results_dataframe(all_results, position_limits)
+        return df.to_dict(orient='records')
+
+    def create_results_dataframe(self, all_results: Dict, position_limits: Dict) -> pd.DataFrame:
+        """Create a DataFrame from the scanning results"""
+        timeframe_columns = [
+            f'{minutes}h' if minutes >= 60 else f'{minutes}m'
+            for minutes in self.timeframes_minutes
+        ]
+        
+        data = []
         for symbol, timeframe_results in sorted(all_results.items()):
             limit_info = position_limits.get(symbol)
             if not limit_info:
                 continue
-
-            # Add symbol header with position information
-            formatted_output.append(
-                f"\n{symbol}: (last price: {limit_info.last_price:.2f} / "
-                f"max position: {limit_info.max_position:.2f} / "
-                f"max leverage: {limit_info.max_leverage})"
-            )
-
-            for timeframe, patterns in sorted(timeframe_results.items()):
-                pattern_list = []
-                wave_values = patterns["wave_values"]
                 
-                # Check and format bull patterns
-                if patterns["bull"]["fast_wave"]:
-                    pattern_list.append("Bull Fast Wave")
-                if patterns["bull"]["slow_wave"]:
-                    pattern_list.append("Bull Slow Wave")
-                    
-                # Check and format bear patterns
-                if patterns["bear"]["fast_wave"]:
-                    pattern_list.append("Bear Fast Wave")
-                if patterns["bear"]["slow_wave"]:
-                    pattern_list.append("Bear Slow Wave")
+            row = {
+                'Pair': symbol,
+                'Max position': limit_info.max_position,
+                'Max leverage': limit_info.max_leverage
+            }
+            
+            for col in timeframe_columns:
+                row[col] = '-'
+            
+            patterns_found = False
+            for timeframe, patterns in timeframe_results.items():
+                tf_minutes = int(timeframe.replace('Min', '')) if timeframe.startswith('Min') else \
+                            int(timeframe.replace('Hour', '')) * 60
+                
+                col_name = f'{tf_minutes//60}h' if tf_minutes >= 60 else f'{tf_minutes}m'
+                
+                # Determine pattern indicators
+                bull_pattern = self._get_pattern_indicator(patterns["bull"])
+                bear_pattern = self._get_pattern_indicator(patterns["bear"])
+                
+                if bull_pattern or bear_pattern:
+                    row[col_name] = f'{bull_pattern}/{bear_pattern}' if bull_pattern and bear_pattern else \
+                                  bull_pattern or bear_pattern
+                    patterns_found = True
+            
+            if patterns_found:
+                data.append(row)
+        
+        df = pd.DataFrame(data)
+        columns = ['Pair'] + timeframe_columns + ['Max position', 'Max leverage']
+        return df[columns].sort_values('Max position', ascending=False)
 
-                if pattern_list:
-                    # Format current wave values
-                    formatted_output.append(
-                        f"    {timeframe}: {', '.join(pattern_list)}\n"
-                        f"    Current Wave Values - Fast: {wave_values['fast_wave']:.4f}, "
-                        f"Slow: {wave_values['slow_wave']:.4f}"
-                    )
-                    
-                    # Add pattern points information
-                    for pattern_type in ["bull", "bear"]:
-                        for wave_type in ["fast_wave", "slow_wave"]:
-                            if patterns[pattern_type][wave_type]:
-                                pattern_points = patterns[pattern_type][wave_type].get("pattern_points")
-                                if pattern_points:
-                                    formatted_output.append(f"\n    {pattern_type.title()} {wave_type.replace('_', ' ').title()} Pattern Points:")
-                                    formatted_output.append(pattern_points)
+    def _get_pattern_indicator(self, patterns: Dict) -> str:
+        """Get pattern indicator string"""
+        if patterns["fast_wave"] and patterns["slow_wave"]:
+            return '\u2191\u2191' if isinstance(patterns, dict) and patterns.get("bull") else '\u2193\u2193'
+        elif patterns["fast_wave"] or patterns["slow_wave"]:
+            return '\u2191' if isinstance(patterns, dict) and patterns.get("bull") else '\u2193'
+        return ''
 
-            # Add a separator between symbols
-            formatted_output.append("-" * 80)
+    def _format_detailed_results(self, all_results: Dict, position_limits: Dict) -> Dict:
+        """Format detailed pattern results"""
+        detailed_results = {}
+        
+        for symbol, timeframe_results in all_results.items():
+            limit_info = position_limits.get(symbol)
+            if not limit_info:
+                continue
 
-        return "\n".join(formatted_output)
+            detailed_results[symbol] = {
+                "position_info": {
+                    "last_price": limit_info.last_price,
+                    "max_position": limit_info.max_position,
+                    "max_leverage": limit_info.max_leverage
+                },
+                "patterns": {
+                    timeframe: {
+                        "wave_values": patterns["wave_values"],
+                        "bull_patterns": self._format_pattern_data(patterns["bull"]),
+                        "bear_patterns": self._format_pattern_data(patterns["bear"])
+                    }
+                    for timeframe, patterns in timeframe_results.items()
+                }
+            }
 
+        return detailed_results
 
+    def _format_pattern_data(self, pattern: Dict) -> Dict:
+        """Format pattern data"""
+        return {
+            "fast_wave": bool(pattern["fast_wave"]),
+            "slow_wave": bool(pattern["slow_wave"]),
+            "pattern_points": pattern.get("pattern_points", {})
+        }
 
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.WARNING,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
+    def _generate_statistics(self, all_results: Dict) -> Dict:
+        """Generate statistical summary"""
+        stats = {
+            "total_pairs_analyzed": len(all_results),
+            "patterns_by_timeframe": defaultdict(lambda: {
+                "bull": {"fast_wave": 0, "slow_wave": 0},
+                "bear": {"fast_wave": 0, "slow_wave": 0}
+            }),
+            "total_patterns": {
+                "bull": {"fast_wave": 0, "slow_wave": 0},
+                "bear": {"fast_wave": 0, "slow_wave": 0}
+            }
+        }
 
-    scanner = AsyncWaveScanner()
-    asyncio.run(scanner.scan_market())
+        for timeframe_results in all_results.values():
+            for timeframe, patterns in timeframe_results.items():
+                for pattern_type in ["bull", "bear"]:
+                    for wave_type in ["fast_wave", "slow_wave"]:
+                        if patterns[pattern_type][wave_type]:
+                            stats["patterns_by_timeframe"][timeframe][pattern_type][wave_type] += 1
+                            stats["total_patterns"][pattern_type][wave_type] += 1
+
+        return stats
+
+    def _get_performance_metrics(self) -> Dict:
+        """Get performance metrics from timing stats"""
+        return {
+            "timing_statistics": timing_stats.get_summary(),
+            "candle_statistics": timing_stats.get_candle_summary()
+        }

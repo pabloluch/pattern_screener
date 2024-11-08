@@ -85,24 +85,17 @@ class TimeframeConverter:
         timeframe_minutes: int,
         limit: int = 498
     ) -> List[AggregatedCandle]:
-        """
-        Get candles for any specified timeframe using the appropriate base timeframe.
-        """
+        """Preserve newest-first order while optimizing internal operations"""
         if not cls.validate_timeframe(timeframe_minutes):
             raise ValueError(f"Invalid timeframe: {timeframe_minutes} minutes")
 
-        # Get the appropriate base timeframe
         base_timeframe, base_minutes = cls.get_base_timeframe(timeframe_minutes)
-        
-        # Get base candles
         base_candles = all_timeframe_candles.get(base_timeframe, [])
+        
         if not base_candles:
             return []
 
-        # Sort candles by timestamp in descending order (newest first)
-        sorted_candles = sorted(base_candles, key=lambda x: x.timestamp, reverse=True)
-        
-        # If requesting the base timeframe, just convert format
+        # Base candles are already in newest-first order
         if timeframe_minutes == base_minutes:
             return [
                 AggregatedCandle(
@@ -113,14 +106,14 @@ class TimeframeConverter:
                     low=candle.low,
                     timeframe=cls.format_timeframe(timeframe_minutes)
                 )
-                for candle in sorted_candles[:limit]
+                for candle in base_candles[:limit]  # Take first 'limit' candles (newest)
             ]
 
-        # Take only the candles we need based on limit and aggregation factor
+        # Take required number of newest candles
         candles_needed = limit * (timeframe_minutes // base_minutes)
-        candles_to_process = sorted_candles[:candles_needed]
+        candles_to_process = base_candles[:candles_needed]
 
-        # Group candles by their aligned timestamp
+        # Group candles by aligned timestamp (maintain newest-first within groups)
         grouped_candles: Dict[int, List[CandleData]] = {}
         for candle in candles_to_process:
             aligned_ts = cls.align_timestamp(candle.timestamp, timeframe_minutes)
@@ -128,24 +121,22 @@ class TimeframeConverter:
                 grouped_candles[aligned_ts] = []
             grouped_candles[aligned_ts].append(candle)
 
-        # Create aggregated candles
+        # Create aggregated candles maintaining newest-first order
         aggregated = []
-        for timestamp in sorted(grouped_candles.keys(), reverse=True):
-            group = sorted(grouped_candles[timestamp], key=lambda x: x.timestamp)
-            if len(group) > 0:
+        for timestamp in sorted(grouped_candles.keys(), reverse=True):  # Process newest timestamps first
+            group = sorted(grouped_candles[timestamp], key=lambda x: x.timestamp, reverse=True)
+            if group:
                 aggregated_candle = AggregatedCandle(
                     timestamp=timestamp,
-                    open=group[0].open,
-                    close=group[-1].close,
+                    open=group[-1].open,  # First candle in period
+                    close=group[0].close,  # Last candle in period
                     high=max(c.high for c in group),
                     low=min(c.low for c in group),
                     timeframe=cls.format_timeframe(timeframe_minutes)
                 )
                 aggregated.append(aggregated_candle)
-                if len(aggregated) >= limit:
-                    break
 
-        return aggregated[:limit]
+        return aggregated[:limit]  # Return newest candles first
 
 #Example usage
 async def main():

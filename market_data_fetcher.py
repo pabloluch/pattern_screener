@@ -25,12 +25,12 @@ class PositionLimit:
     max_position: float
 
 class TimeframeSession:
-    def __init__(self, timeframe: str, rate_limit: int = 10):
+    def __init__(self, timeframe: str, rate_limit: int = 8):
         self.timeframe = timeframe
         self.base_url = "https://contract.mexc.com/api/v1/contract"
         self.session = None
         self.semaphore = asyncio.Semaphore(rate_limit)
-        self.rate_limit_delay = 0.1
+        self.rate_limit_delay = 0.15
         self.logger = logging.getLogger(f"{__name__}_{timeframe}")
 
     async def __aenter__(self):
@@ -47,17 +47,24 @@ class TimeframeSession:
                 await asyncio.sleep(self.rate_limit_delay)
                 async with self.session.get(url, params=params, timeout=10) as response:
                     if response.status == 200:
-                        return await response.json()
+                        data = await response.json()
+                        if data and data.get('data'):
+                            return data
+                        # If we got empty data, retry once
+                        await asyncio.sleep(0.5)
+                        async with self.session.get(url, params=params, timeout=10) as retry_response:
+                            if retry_response.status == 200:
+                                return await retry_response.json()
                     else:
-                        self.logger.error(f"Error in request {url}: {response.status}")
+                        self.logger.warning(f"Request failed for {url}: {response.status}")
                         return None
             except Exception as e:
-                self.logger.error(f"Exception in request {url}: {str(e)}")
+                self.logger.warning(f"Error fetching {url}: {str(e)}")
                 return None
 
     async def fetch_candles_batch(self, symbols: List[str]) -> Dict[str, List[CandleData]]:
         results = {}
-        batch_size = 20
+        batch_size = 15  # Increased from 10 to 15
         
         for i in range(0, len(symbols), batch_size):
             batch_symbols = symbols[i:i + batch_size]
@@ -65,42 +72,46 @@ class TimeframeSession:
             batch_results = await asyncio.gather(*tasks)
             
             for symbol, candles in zip(batch_symbols, batch_results):
-                results[symbol] = candles
+                if candles:  # Only store if we got data
+                    results[symbol] = candles
             
             if i + batch_size < len(symbols):
-                await asyncio.sleep(2)
+                await asyncio.sleep(2)  # Reduced from 3 to 2
         
         return results
 
     async def fetch_single_candles(self, symbol: str, limit: int = 498) -> List[CandleData]:
         url = f"{self.base_url}/kline/{symbol}"
         params = {'interval': self.timeframe, 'limit': limit}
-        data = await self._safe_request(url, params)
         
-        if not data:
-            return []
+        for _ in range(2):  # Try up to 2 times
+            data = await self._safe_request(url, params)
+            if data and isinstance(data.get('data'), dict):
+                data = data.get('data', {})
+                candles = []
+                
+                times = data.get('time', [])
+                opens = data.get('open', [])
+                closes = data.get('close', [])
+                highs = data.get('high', [])
+                lows = data.get('low', [])
+                
+                if len(times) >= limit * 0.95:  # If we got at least 95% of requested candles
+                    for i in range(len(times)):
+                        candle = CandleData(
+                            timestamp=times[i],
+                            open=opens[i],
+                            close=closes[i],
+                            high=highs[i],
+                            low=lows[i],
+                            timeframe=self.timeframe
+                        )
+                        candles.append(candle)
+                    return candles
+                
+                await asyncio.sleep(0.5)  # Wait before retry
             
-        data = data.get('data', {})
-        candles = []
-        
-        times = data.get('time', [])
-        opens = data.get('open', [])
-        closes = data.get('close', [])
-        highs = data.get('high', [])
-        lows = data.get('low', [])
-        
-        for i in range(len(times)):
-            candle = CandleData(
-                timestamp=times[i],
-                open=opens[i],
-                close=closes[i],
-                high=highs[i],
-                low=lows[i],
-                timeframe=self.timeframe
-            )
-            candles.append(candle)
-        
-        return candles
+        return []
 
 class MultiSessionMarketFetcher:
     def __init__(self, timeframes: List[str]):
