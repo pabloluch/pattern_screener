@@ -25,14 +25,14 @@ class AsyncWaveScanner:
 
     @timing_decorator
     async def scan_market(self) -> Dict[str, Any]:
-        """Main method to scan the market for patterns with detailed logging"""
+        """Full market scan implementation"""
         try:
             async with timing_stats.measure_total_time_async():
-                self.logger.info("=== Starting Market Scan ===")
+                self.logger.info("=== Starting Full Market Scan ===")
                 
                 async with MultiSessionMarketFetcher(self.timeframes) as fetcher:
-                    # Step 1: Fetch pairs
-                    self.logger.info("Step 1/4: Fetching perpetual pairs...")
+                    # Step 1: Fetch all pairs
+                    self.logger.info("Step 1/4: Fetching all perpetual pairs...")
                     pairs = await fetcher.fetch_perpetual_pairs()
                     self.logger.info(f"Found {len(pairs)} total pairs")
                     
@@ -62,13 +62,21 @@ class AsyncWaveScanner:
                             "data": None
                         }
 
-                    # Step 3: Fetch candles
+                    # Step 3: Fetch candles for all eligible pairs
                     self.logger.info("Step 3/4: Fetching candle data...")
-                    symbols = list(eligible_pairs.keys())[:5]  # Limit to 5 pairs for testing
-                    self.logger.info(f"Processing pairs: {symbols}")
+                    symbols = list(eligible_pairs.keys())
+                    self.logger.info(f"Processing {len(symbols)} pairs...")
                     
-                    all_candles = await fetcher.fetch_all_candles(symbols)
-                    self.logger.info(f"Fetched candle data for {len(all_candles)} pairs")
+                    # Process in batches to avoid overwhelming the API
+                    batch_size = 10
+                    all_candles = {}
+                    
+                    for i in range(0, len(symbols), batch_size):
+                        batch = symbols[i:i + batch_size]
+                        self.logger.info(f"Fetching batch {i//batch_size + 1}/{(len(symbols) + batch_size - 1)//batch_size}")
+                        batch_candles = await fetcher.fetch_all_candles(batch)
+                        all_candles.update(batch_candles)
+                        self.logger.info(f"Completed batch. Total pairs processed: {len(all_candles)}")
                     
                     # Step 4: Analysis
                     self.logger.info("Step 4/4: Analyzing patterns...")
@@ -90,10 +98,16 @@ class AsyncWaveScanner:
                     self.logger.info("Generating response...")
                     response_data = self._generate_response(all_results, position_limits)
                     
-                    self.logger.info("=== Market Scan Complete ===")
+                    self.logger.info("=== Full Market Scan Complete ===")
                     return {
                         "status": "success",
                         "message": "Market scan completed successfully",
+                        "scan_summary": {
+                            "total_pairs": len(pairs),
+                            "eligible_pairs": len(eligible_pairs),
+                            "pairs_with_patterns": len(all_results),
+                            "timeframes_analyzed": len(self.timeframes_minutes)
+                        },
                         "data": response_data
                     }
 
