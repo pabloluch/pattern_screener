@@ -25,62 +25,84 @@ class AsyncWaveScanner:
 
     @timing_decorator
     async def scan_market(self) -> Dict[str, Any]:
-        """
-        Main method to scan the market for wave patterns.
-        Returns a structured dictionary containing scan results and statistics.
-        """
+        """Main method to scan the market for patterns with detailed logging"""
         try:
             async with timing_stats.measure_total_time_async():
+                self.logger.info("=== Starting Market Scan ===")
+                
                 async with MultiSessionMarketFetcher(self.timeframes) as fetcher:
-                    # Fetch market pairs
+                    # Step 1: Fetch pairs
+                    self.logger.info("Step 1/4: Fetching perpetual pairs...")
                     pairs = await fetcher.fetch_perpetual_pairs()
+                    self.logger.info(f"Found {len(pairs)} total pairs")
+                    
                     if not pairs:
+                        self.logger.error("No pairs fetched from exchange")
                         return {
                             "status": "error",
                             "message": "No pairs fetched from the exchange",
                             "data": None
                         }
 
-                    # Get position limits and filter eligible pairs
+                    # Step 2: Get position limits
+                    self.logger.info("Step 2/4: Fetching position limits...")
                     position_limits = await fetcher.fetch_position_limits(pairs)
                     eligible_pairs = {
                         symbol: limit_info
                         for symbol, limit_info in position_limits.items()
                         if limit_info.max_position > self.min_position_size
                     }
+                    self.logger.info(f"Found {len(eligible_pairs)} eligible pairs")
 
                     if not eligible_pairs:
+                        self.logger.error("No eligible pairs found")
                         return {
                             "status": "error",
                             "message": "No eligible pairs found",
                             "data": None
                         }
 
-                    # Fetch candle data
-                    all_candles = await fetcher.fetch_all_candles(list(eligible_pairs.keys()))
+                    # Step 3: Fetch candles
+                    self.logger.info("Step 3/4: Fetching candle data...")
+                    symbols = list(eligible_pairs.keys())[:5]  # Limit to 5 pairs for testing
+                    self.logger.info(f"Processing pairs: {symbols}")
                     
-                    # Monitor candle reception
-                    self._monitor_candles(eligible_pairs, all_candles)
+                    all_candles = await fetcher.fetch_all_candles(symbols)
+                    self.logger.info(f"Fetched candle data for {len(all_candles)} pairs")
+                    
+                    # Step 4: Analysis
+                    self.logger.info("Step 4/4: Analyzing patterns...")
+                    all_results = {}
+                    
+                    for symbol, timeframe_data in all_candles.items():
+                        self.logger.info(f"Analyzing {symbol}...")
+                        try:
+                            patterns = await self.analyze_symbol(symbol, timeframe_data)
+                            if any(pattern for pattern in patterns.values()):
+                                all_results[symbol] = patterns
+                                self.logger.info(f"Found patterns for {symbol}")
+                        except Exception as e:
+                            self.logger.error(f"Error analyzing {symbol}: {str(e)}")
+                    
+                    self.logger.info(f"Analysis complete. Found patterns in {len(all_results)} pairs")
 
-                    # Analyze patterns
-                    all_results = await self.analyze_all_symbols(eligible_pairs, all_candles)
-
-                    # Generate response data
+                    # Generate response
+                    self.logger.info("Generating response...")
                     response_data = self._generate_response(all_results, position_limits)
                     
+                    self.logger.info("=== Market Scan Complete ===")
                     return {
                         "status": "success",
                         "message": "Market scan completed successfully",
                         "data": response_data
                     }
 
+        except asyncio.TimeoutError:
+            self.logger.error("Market scan timed out")
+            raise
         except Exception as e:
             self.logger.error(f"Error in market scan: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"Market scan failed: {str(e)}",
-                "data": None
-            }
+            raise
 
     def _monitor_candles(self, eligible_pairs: Dict, all_candles: Dict) -> None:
         """Monitor candle reception for all eligible pairs"""
@@ -105,43 +127,50 @@ class AsyncWaveScanner:
         return all_results
 
     async def analyze_symbol(self, symbol: str, timeframe_data: Dict[str, List]) -> Dict[str, dict]:
-        """Analyze patterns for a specific symbol across all timeframes"""
+        """Analyze patterns for a specific symbol with logging"""
         results = {}
+        self.logger.info(f"  Analyzing timeframes for {symbol}...")
         
         for minutes in self.timeframes_minutes:
-            timeframe_candles = self.converter.get_candles(timeframe_data, minutes)
-            timeframe = self.converter.format_timeframe(minutes)
-            
-            if not timeframe_candles:
-                continue
+            try:
+                timeframe_candles = self.converter.get_candles(timeframe_data, minutes)
+                timeframe = self.converter.format_timeframe(minutes)
+                
+                if not timeframe_candles:
+                    self.logger.warning(f"  No candles for {symbol} {timeframe}")
+                    continue
 
-            # Calculate wave indicators
-            fast_wave, slow_wave, timestamps = self.wave_indicator.calculate(timeframe_candles)
-            
-            if len(fast_wave) == 0 or len(slow_wave) == 0:
-                continue
-            
-            wave_data = WaveData(
-                timeframe=timeframe,
-                fast_wave=fast_wave,
-                slow_wave=slow_wave,
-                timestamps=timestamps
-            )
-            
-            # Detect patterns
-            bull_patterns = await asyncio.to_thread(self.bull_detector.detect_patterns, wave_data)
-            bear_patterns = await asyncio.to_thread(self.bear_detector.detect_patterns, wave_data)
+                # Calculate wave indicators
+                fast_wave, slow_wave, timestamps = self.wave_indicator.calculate(timeframe_candles)
+                
+                if len(fast_wave) == 0 or len(slow_wave) == 0:
+                    self.logger.warning(f"  No wave data for {symbol} {timeframe}")
+                    continue
+                
+                wave_data = WaveData(
+                    timeframe=timeframe,
+                    fast_wave=fast_wave,
+                    slow_wave=slow_wave,
+                    timestamps=timestamps
+                )
+                
+                # Detect patterns
+                bull_patterns = await asyncio.to_thread(self.bull_detector.detect_patterns, wave_data)
+                bear_patterns = await asyncio.to_thread(self.bear_detector.detect_patterns, wave_data)
 
-            if bull_patterns["fast_wave"] or bull_patterns["slow_wave"] or \
-               bear_patterns["fast_wave"] or bear_patterns["slow_wave"]:
-                results[timeframe] = {
-                    "bull": bull_patterns,
-                    "bear": bear_patterns,
-                    "wave_values": {
-                        "fast_wave": float(fast_wave[0]) if len(fast_wave) > 0 else 0,
-                        "slow_wave": float(slow_wave[0]) if len(slow_wave) > 0 else 0
+                if bull_patterns["fast_wave"] or bull_patterns["slow_wave"] or \
+                   bear_patterns["fast_wave"] or bear_patterns["slow_wave"]:
+                    results[timeframe] = {
+                        "bull": bull_patterns,
+                        "bear": bear_patterns,
+                        "wave_values": {
+                            "fast_wave": float(fast_wave[0]) if len(fast_wave) > 0 else 0,
+                            "slow_wave": float(slow_wave[0]) if len(slow_wave) > 0 else 0
+                        }
                     }
-                }
+                    self.logger.info(f"  Found patterns for {symbol} {timeframe}")
+            except Exception as e:
+                self.logger.error(f"  Error analyzing {symbol} {timeframe}: {str(e)}")
 
         return results
 
