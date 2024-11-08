@@ -4,55 +4,75 @@ import asyncio
 import sys
 from datetime import datetime
 from typing import Dict, Any
+import json
 
 async def verify_endpoint(session: aiohttp.ClientSession, url: str, endpoint: str) -> Dict[str, Any]:
-    """Verify a specific endpoint"""
+    """Verify a specific endpoint with detailed error reporting"""
     try:
+        print(f"\nTesting {endpoint}...")
+        start_time = datetime.now()
         async with session.get(f"{url}{endpoint}") as response:
-            data = await response.json()
-            return {
-                "endpoint": endpoint,
-                "status": response.status,
-                "response": data
-            }
+            try:
+                data = await response.json()
+                return {
+                    "endpoint": endpoint,
+                    "status": response.status,
+                    "duration": (datetime.now() - start_time).total_seconds(),
+                    "response": data
+                }
+            except Exception as json_error:
+                text = await response.text()
+                return {
+                    "endpoint": endpoint,
+                    "status": response.status,
+                    "error": f"JSON Parse Error: {str(json_error)}\nRaw Response: {text[:500]}...",
+                    "duration": (datetime.now() - start_time).total_seconds()
+                }
     except Exception as e:
         return {
             "endpoint": endpoint,
             "status": "error",
-            "error": str(e)
+            "error": f"Error: {str(e)}\nType: {type(e).__name__}"
         }
 
 async def verify_deployment(base_url: str):
-    """Verify deployment by checking all endpoints"""
+    """Verify deployment with enhanced error reporting"""
     print(f"Verifying deployment at {base_url}")
     print(f"Started at: {datetime.now().isoformat()}")
     print("-" * 50)
     
-    async with aiohttp.ClientSession() as session:
-        endpoints = ["/", "/health", "/status"]
-        results = await asyncio.gather(*[
-            verify_endpoint(session, base_url, endpoint)
-            for endpoint in endpoints
-        ])
+    timeout = aiohttp.ClientTimeout(total=300)  # 5 minute timeout
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        endpoints = ["/", "/health", "/status", "/scan"]
+        results = []
         
-        all_passed = True
-        for result in results:
-            print(f"\nChecking {result['endpoint']}:")
-            if result['status'] == 200:
+        # Check endpoints sequentially
+        for endpoint in endpoints:
+            result = await verify_endpoint(session, base_url, endpoint)
+            print(f"\nChecking {endpoint}:")
+            
+            if result["status"] == 200:
                 print("✅ Success")
+                print(f"Response: {json.dumps(result['response'], indent=2)}")
             else:
                 print("❌ Failed")
+                print(f"Status: {result['status']}")
                 print(f"Error: {result.get('error', 'Unknown error')}")
-                all_passed = False
-            print(f"Response: {result.get('response', 'No response')}")
+            
+            results.append(result)
         
-        print("\n" + "-" * 50)
-        if all_passed:
-            print("✅ All checks passed!")
-            return True
-        else:
-            print("❌ Some checks failed!")
-            return False
+        # Summary
+        print("\n" + "=" * 50)
+        print("Deployment Verification Summary:")
+        print("=" * 50)
+        all_passed = all(r["status"] == 200 for r in results)
+        
+        for r in results:
+            status = "✅" if r["status"] == 200 else "❌"
+            print(f"{status} {r['endpoint']}: {r['status']}")
+        
+        print("\nOverall Status:", "✅ PASSED" if all_passed else "❌ FAILED")
+        return all_passed
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

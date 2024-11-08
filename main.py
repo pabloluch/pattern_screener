@@ -32,25 +32,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Application starting up")
+start_time = datetime.now()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Application shutting down")
-
-class HealthCheck(BaseModel):
+class HealthResponse(BaseModel):
     status: str
     timestamp: str
     uptime: float
     version: str
 
-start_time = datetime.now()
+class DetailedHealthResponse(BaseModel):
+    status: str
+    timestamp: str
+    checks: Dict[str, str]
 
-@app.get("/", response_model=HealthCheck)
+@app.get("/", response_model=HealthResponse)
 async def root():
-    logger.info("Health check endpoint accessed")
+    """Basic health check endpoint"""
+    logger.info("Root endpoint accessed")
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -58,9 +56,42 @@ async def root():
         "version": "1.0.0"
     }
 
+@app.get("/health", response_model=DetailedHealthResponse)
+async def health_check():
+    """Detailed health check endpoint"""
+    logger.info("Health check endpoint accessed")
+    try:
+        # Test scanner initialization
+        scanner = AsyncWaveScanner()
+        scanner_status = "operational"
+    except Exception as e:
+        logger.error(f"Scanner initialization failed: {str(e)}")
+        scanner_status = "error"
+    
+    return {
+        "status": "healthy" if scanner_status == "operational" else "unhealthy",
+        "timestamp": datetime.now().isoformat(),
+        "checks": {
+            "api": "operational",
+            "scanner": scanner_status
+        }
+    }
+
+@app.get("/status")
+async def get_status():
+    """Get API status and metrics"""
+    logger.info("Status endpoint accessed")
+    return {
+        "status": "operational",
+        "timestamp": datetime.now().isoformat(),
+        "uptime": (datetime.now() - start_time).total_seconds(),
+        "version": "1.0.0",
+        "endpoints": ["/", "/health", "/scan", "/status"]
+    }
+
 @app.get("/scan")
 async def scan_market():
-    """Run market scan for patterns with enhanced error handling"""
+    """Run market scan for patterns"""
     scan_start_time = datetime.now()
     logger.info("Starting market scan")
     
@@ -100,17 +131,15 @@ async def scan_market():
             }
         )
 
-@app.get("/status")
-async def get_status():
-    """Get API status and basic statistics"""
-    logger.info("Status endpoint accessed")
-    return {
-        "status": "operational",
-        "timestamp": datetime.now().isoformat(),
-        "uptime": (datetime.now() - start_time).total_seconds(),
-        "version": "1.0.0",
-        "endpoints": ["/", "/health", "/scan", "/status"]
-    }
+@app.on_event("startup")
+async def startup_event():
+    """Log application startup"""
+    logger.info("Application starting up")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Log application shutdown"""
+    logger.info("Application shutting down")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
