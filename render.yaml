@@ -3,16 +3,16 @@ services:
     name: wave-scanner
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 4
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 75
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: LOG_LEVEL
         value: INFO
       - key: MAX_WORKERS
-        value: 4
+        value: 1
+      - key: WORKER_TIMEOUT
+        value: 300
     healthCheckPath: /health
     autoDeploy: true
     numInstances: 1
-    domains:
-      - wave-scanner-api

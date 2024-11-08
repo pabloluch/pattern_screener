@@ -11,7 +11,10 @@ import logging
 from pydantic import BaseModel
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -29,6 +32,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Application starting up")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Application shutting down")
+
 class HealthCheck(BaseModel):
     status: str
     timestamp: str
@@ -39,7 +50,7 @@ start_time = datetime.now()
 
 @app.get("/", response_model=HealthCheck)
 async def root():
-    """Root endpoint serving as a health check"""
+    logger.info("Health check endpoint accessed")
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -47,43 +58,38 @@ async def root():
         "version": "1.0.0"
     }
 
-@app.get("/health")
-async def health_check():
-    """Detailed health check endpoint"""
-    try:
-        # Try to create scanner instance to verify dependencies
-        scanner = AsyncWaveScanner()
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "status": "healthy",
-                "timestamp": datetime.now().isoformat(),
-                "checks": {
-                    "scanner": "operational",
-                    "api": "operational"
-                }
-            }
-        )
-    except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={
-                "status": "unhealthy",
-                "timestamp": datetime.now().isoformat(),
-                "error": str(e)
-            }
-        )
-
 @app.get("/scan")
 async def scan_market():
-    """Run market scan for patterns"""
+    """Run market scan for patterns with enhanced error handling"""
+    scan_start_time = datetime.now()
+    logger.info("Starting market scan")
+    
     try:
-        logger.info("Starting market scan")
         scanner = AsyncWaveScanner()
-        results = await scanner.scan_market()
-        logger.info("Market scan completed successfully")
-        return results
+        # Set a timeout for the entire scan operation
+        results = await asyncio.wait_for(
+            scanner.scan_market(),
+            timeout=240  # 4 minutes timeout
+        )
+        
+        duration = (datetime.now() - scan_start_time).total_seconds()
+        logger.info(f"Market scan completed successfully in {duration:.2f} seconds")
+        
+        return {
+            "status": "success",
+            "duration": duration,
+            "timestamp": datetime.now().isoformat(),
+            "results": results
+        }
+    except asyncio.TimeoutError:
+        logger.error("Market scan timed out")
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error": "Scan operation timed out",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
     except Exception as e:
         logger.error(f"Market scan failed: {str(e)}")
         raise HTTPException(
@@ -97,17 +103,13 @@ async def scan_market():
 @app.get("/status")
 async def get_status():
     """Get API status and basic statistics"""
+    logger.info("Status endpoint accessed")
     return {
         "status": "operational",
         "timestamp": datetime.now().isoformat(),
         "uptime": (datetime.now() - start_time).total_seconds(),
         "version": "1.0.0",
-        "endpoints": [
-            "/",
-            "/health",
-            "/scan",
-            "/status"
-        ]
+        "endpoints": ["/", "/health", "/scan", "/status"]
     }
 
 if __name__ == "__main__":
